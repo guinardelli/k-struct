@@ -56,6 +56,12 @@ A compilação dos pacotes prepara o OOFEM a partir do commit fixado da versão 
 
 No modelo espacial, defina os eixos e as cotas em **Eixos e pavimentos**. Escolha o pavimento para lançar vigas em planta e alterne para uma elevação para lançar pilares. **Orto** alinha a segunda extremidade no plano. Segure `Shift` para inverter o modo durante o clique. Use `Ctrl` ou `Shift` para montar uma seleção e **Replicar** para copiar a geometria até outro pavimento. Use **Conectar interseções** onde as barras precisam compartilhar nós.
 
+### Padrões e casos de carga
+
+Abra **Cargas e casos** para criar padrões como permanentes, sobrecarga ou vento Y e definir casos estáticos com os fatores de cada padrão. Em **Modelo**, selecione o padrão no qual deseja trabalhar e atribua as ações pelos campos de propriedades de cada nó ou barra.
+
+No desktop, selecione um **Caso de análise** e clique em **Analisar**. Repita para os demais casos. O mesmo seletor alterna entre diagramas e tabelas já calculados para a revisão atual. Os CSVs identificam o nome e o ID do caso. Uma edição do modelo ou das definições descarta os resultados em memória.
+
 Atalhos: `V` selecionar, `N` nó, `B` barra, `Esc` cancelar lançamento, `Delete` excluir seleção, `Ctrl+Z` desfazer, `Ctrl+Shift+Z` refazer e `Ctrl+S` salvar. Na elevação, scroll aproxima e afasta, botão central arrasta. A vista 3D orbita ao arrastar.
 
 ## Verificação
@@ -71,7 +77,7 @@ Os benchmarks numéricos exigem `OOFEM_BIN`. Sem ele, aparecem explicitamente co
 
 ```sh
 OOFEM_BIN=/caminho/absoluto/oofem npm test
-OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- spatial.spec.ts
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- spatial.spec.ts load-cases.spec.ts
 cargo test --manifest-path crates/solver-runner/Cargo.toml
 ```
 

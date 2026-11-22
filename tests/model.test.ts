@@ -180,4 +180,17 @@ describe("pré-validação e contrato do adaptador", () => {
       parseOofemOutput("Output for time 1\nFinishing analysis", input),
     ).toThrow(/ausentes/);
   });
+  it("impede cargas ponderadas não finitas apenas no caso que as aplica", () => {
+    const p = beamExample();
+    p.analysisCases.push({
+      ...p.analysisCases[0],
+      id: "Excesso",
+      name: "Caso com fator excessivo",
+      factors: [{ patternId: "G", factor: 1e308 }],
+    });
+    expect(exportOofem(p, "EL").deck).toContain("ConstantEdgeLoad");
+    expect(() => exportOofem(p, "Excesso")).toThrow(
+      /fora do intervalo numérico/,
+    );
+  });
 });

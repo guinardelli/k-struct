@@ -258,6 +258,12 @@ button.primary {
 .loads-group {
   min-width: 190px;
 }
+.manage-loads {
+  align-self: flex-start;
+  color: #c6b0e0;
+  padding: 3px 5px;
+  font-size: 10px;
+}
 .ribbon label {
   display: flex;
   flex-direction: column;
@@ -805,6 +811,14 @@ button.primary {
   font-size: 8px;
   color: #6bc3a9;
 }
+.result-actions .result-case-name {
+  display: block;
+  max-width: 145px;
+  overflow: hidden;
+  color: #c6b0e0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .result-actions button {
   font-size: 9px;
   padding: 5px;
@@ -1160,6 +1174,52 @@ button.primary {
   max-width: calc(100vw - 24px);
   max-height: calc(100vh - 24px);
   overflow: auto;
+}
+.load-editor {
+  width: 590px;
+  color: #cbd2df;
+}
+.load-editor::backdrop {
+  background: #050913c9;
+  backdrop-filter: blur(4px);
+}
+.load-definition-fields {
+  display: grid;
+  gap: 12px;
+}
+.load-definition-fields label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  min-width: 0;
+}
+.load-definition-fields select {
+  width: 100%;
+}
+.definition-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: end;
+}
+.definition-picker label {
+  flex: 1 1 160px;
+}
+.definition-picker button,
+.case-factors button {
+  border-color: #3c475c;
+}
+.case-factors {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.case-factors .guide-row {
+  grid-template-columns: minmax(0, 1fr) minmax(60px, 95px) auto;
+}
+.case-factors p {
+  margin-top: 0;
 }
 .guide-tabs {
   display: flex;

@@ -181,8 +181,16 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   }
   for (const factor of analysisCase.factors) {
     const pat = p.loadPatterns.find((pat) => pat.id === factor.patternId)!;
+    const scaleLoad = (values: number[]) => {
+      const components = values.map((value) => value * factor.factor);
+      if (components.some((value) => !Number.isFinite(value)))
+        throw new Error(
+          `O fator do padrão ${pat.name} gera uma carga fora do intervalo numérico no caso ${analysisCase.name}.`,
+        );
+      return components;
+    };
     for (const l of pat.nodal) {
-      const values = dofs.map(([, , key]) => l[key] * factor.factor);
+      const values = scaleLoad(dofs.map(([, , key]) => l[key]));
       if (!values.some(Boolean)) continue;
       bcs.push(
         `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")} set ${set(`nodes 1 ${nodeNumber(l.nodeId)}`)}`,
@@ -205,7 +213,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         ? [...axes.get(l.memberId)!.map((axis) => dot(axis, q)), 0, 0, 0]
         : [c * l.qx + s * l.qz, -s * l.qx + c * l.qz, 0];
       bcs.push(
-        `ConstantEdgeLoad ${bcs.length + 1} loadTimeFunction 1${spatial ? ` dofs ${dofList}` : ""} Components ${values.length} ${values.map((v) => v * factor.factor).join(" ")} loadType 3 csType 1 set ${set(`elementedges ${ids.length} ${ids.join(" ")}`)}`,
+        `ConstantEdgeLoad ${bcs.length + 1} loadTimeFunction 1${spatial ? ` dofs ${dofList}` : ""} Components ${values.length} ${scaleLoad(values).join(" ")} loadType 3 csType 1 set ${set(`elementedges ${ids.length} ${ids.join(" ")}`)}`,
       );
     }
   }

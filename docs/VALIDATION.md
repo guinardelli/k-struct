@@ -50,6 +50,12 @@ O teste Playwright lança o modelo do vazio, altera eixos e cotas, replica vigas
 
 Um balanço espacial com rotação de seção de 90° verifica também a extensão axial, a flexão em ambos os planos e a torção pelas expressões fechadas de Euler–Bernoulli e Saint-Venant.
 
+## Casos de carga no pórtico espacial
+
+O Playwright reutiliza a geometria do pórtico para cadastrar um caso vertical com carga uniforme em B5 e um caso de vento Y com força nodal em N5. O teste salva e reabre o projeto e confere as entradas do OOFEM exportadas para cada caso.
+
+Com `OOFEM_BIN`, o caso vertical tem resultante de reação de 25,654 kN em Z. O caso de vento aplica o fator de ensaio −0,75 sobre a força de 12 kN em Y e tem resultante de reação de 9 kN em Y. O teste confere as duas resultantes, alterna entre diagramas já calculados, verifica a identificação do caso no CSV e confirma a invalidação dos resultados após uma edição.
+
 ## Ainda não validado nesta etapa
 
 Flambagem/P–Δ, massas/modal, combinações/envelopes, cascas, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.

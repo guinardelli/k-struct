@@ -20,6 +20,7 @@ import {
   BookOpen,
   GitBranch,
   History,
+  ListChecks,
   Square,
   PanelLeft,
   PanelRight,
@@ -64,6 +65,9 @@ import Inspector from "./components/Inspector";
 import Results from "./components/Results";
 import SolverSettings from "./components/SolverSettings";
 import RunHistory from "./components/RunHistory";
+import LoadDefinitions, {
+  type LoadDefinitionsPage,
+} from "./components/LoadDefinitions";
 import { version } from "../package.json";
 import {
   exportOofem,
@@ -114,7 +118,10 @@ export default function App() {
   const plane: WorkPlane = { kind, offset: spatial ? activeGuide.position : 0 };
   const [pending, setPending] = useState<Point3 | null>(null),
     [display, setDisplay] = useState<Display>("model");
-  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [caseResults, setCaseResults] = useState<Map<string, AnalysisResult>>(
+    () => new Map(),
+  );
+  const modelRevision = useRef(0);
   const [activeRun, setActiveRun] = useState<{
     id: string;
     ready: boolean;
@@ -127,7 +134,7 @@ export default function App() {
   const [message, setMessage] = useState(
     "Pronto para modelar. Selecione Barra (B) e marque duas extremidades no plano de trabalho.",
   );
-  const [saved, setSaved] = useState(serializeProject(p));
+  const [saved, setSaved] = useState(() => serializeProject(p));
   const [tab, setTab] = useState("Modelo"),
     [settings, setSettings] = useState(false),
     [left, setLeft] = useState(true),
@@ -140,8 +147,19 @@ export default function App() {
       return "";
     }
   });
-  const [caseId, setCaseId] = useState(p.analysisCases[0].id),
-    [patternId, setPatternId] = useState(p.loadPatterns[0].id);
+  const [preferredCaseId, setCaseId] = useState(p.analysisCases[0].id),
+    [preferredPatternId, setPatternId] = useState(p.loadPatterns[0].id);
+  const analysisCase =
+    p.analysisCases.find((c) => c.id === preferredCaseId) ?? p.analysisCases[0];
+  const caseId = analysisCase.id;
+  const patternId =
+    p.loadPatterns.find((pattern) => pattern.id === preferredPatternId)?.id ??
+    p.loadPatterns[0].id;
+  const result = caseResults.get(caseId) ?? null;
+  const defaultDiagram = spatial ? "deformed" : "m";
+  const [loadEditor, setLoadEditor] = useState<LoadDefinitionsPage | null>(
+    null,
+  );
   const [confirmation, setConfirmation] = useState<{
     label: string;
     action: () => void;
@@ -152,8 +170,6 @@ export default function App() {
   const serialized = serializeProject(p),
     dirty = serialized !== saved;
   useEffect(() => {
-    setResult(null);
-    setDisplay("model");
     try {
       localStorage.setItem("kstruct.draft.v2", serialized);
     } catch {
@@ -171,29 +187,48 @@ export default function App() {
     window.addEventListener("beforeunload", fn);
     return () => window.removeEventListener("beforeunload", fn);
   }, [dirty]);
-  const edit = useCallback((fn: (p: Project) => void) => {
-    try {
-      const next = structuredClone(current.current);
-      fn(next);
-      if (!projectSchema.safeParse(next).success)
-        throw new Error(
-          "A alteração contém valores inválidos ou excede os limites do projeto.",
-        );
-      const errors = referenceErrors(next);
-      if (errors.length) throw new Error(errors.join("\n"));
-      if (serializeProject(next) !== serializeProject(current.current)) {
-        current.current = next;
-        dispatch({ type: "change", project: next });
-        setResult(null);
-        setDisplay("model");
-      }
-      return null;
-    } catch (e) {
-      const error = e instanceof Error ? e.message : String(e);
-      setMessage(error);
-      return error;
-    }
+  const invalidateResults = useCallback(() => {
+    modelRevision.current++;
+    setCaseResults(new Map());
+    setDisplay("model");
   }, []);
+  const edit = useCallback(
+    (fn: (p: Project) => void) => {
+      try {
+        const next = structuredClone(current.current);
+        fn(next);
+        if (!projectSchema.safeParse(next).success)
+          throw new Error(
+            "A alteração contém valores inválidos ou excede os limites do projeto.",
+          );
+        const errors = referenceErrors(next);
+        if (errors.length) throw new Error(errors.join("\n"));
+        if (serializeProject(next) !== serializeProject(current.current)) {
+          current.current = next;
+          dispatch({ type: "change", project: next });
+          invalidateResults();
+        }
+        return null;
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        setMessage(error);
+        return error;
+      }
+    },
+    [invalidateResults],
+  );
+  const selectAnalysisCase = (id: string) => {
+    const selected = p.analysisCases.find((item) => item.id === id);
+    if (!selected) return;
+    setCaseId(id);
+    if (caseResults.has(id)) {
+      setDisplay((value) => (value === "model" ? defaultDiagram : value));
+      setMessage(`Resultados do caso ${selected.name}.`);
+    } else {
+      setDisplay("model");
+      setMessage(`Caso ${selected.name} selecionado. Clique em Analisar.`);
+    }
+  };
   const isSelected = (kind: SelectedObject["kind"], id: string) =>
     selection.some((s) => s.kind === kind && s.id === id);
   const selectObject = (object: Selection, additive = false) => {
@@ -213,7 +248,7 @@ export default function App() {
     setDisplay("model");
   };
   const replace = (project: Project) => {
-    setResult(null);
+    invalidateResults();
     current.current = project;
     dispatch({ type: "reset", project });
     setSelection([]);
@@ -258,21 +293,22 @@ export default function App() {
     setPending(null);
   };
   const undo = () => {
-    setResult(null);
-    setDisplay("model");
+    if (!history.past.length) return;
+    invalidateResults();
     dispatch({ type: "undo" });
     setSelection([]);
     setPending(null);
   };
   const redo = () => {
-    setResult(null);
-    setDisplay("model");
+    if (!history.future.length) return;
+    invalidateResults();
     dispatch({ type: "redo" });
     setSelection([]);
     setPending(null);
   };
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if (loadEditor) return;
       if (launchDialog) {
         if (e.key === "Escape") setLaunchDialog(null);
         return;
@@ -371,17 +407,24 @@ export default function App() {
   };
   const run = async () => {
     if (activeRunId.current) return;
+    const snapshot = current.current;
+    const revision = modelRevision.current;
+    const requestedCase =
+      snapshot.analysisCases.find((item) => item.id === caseId) ??
+      snapshot.analysisCases[0];
     const id = uid();
     activeRunId.current = id;
     setActiveRun({ id, ready: false, cancelling: false });
-    setResult(null);
+    setCaseResults((results) => {
+      const updated = new Map(results);
+      updated.delete(requestedCase.id);
+      return updated;
+    });
     setDisplay("model");
-    const snapshot = serializeProject(p),
-      requestedCase = caseId;
     try {
       const { execution, input } = await analyze(
-        p,
-        caseId,
+        snapshot,
+        requestedCase.id,
         executable,
         id,
         () => {
@@ -394,6 +437,12 @@ export default function App() {
       const historyNotice = execution.historyError
         ? `\n${execution.historyError}`
         : "";
+      if (modelRevision.current !== revision) {
+        setMessage(
+          `O modelo mudou durante a análise. Execute novamente para obter resultados atuais.${historyNotice}`,
+        );
+        return;
+      }
       if (
         execution.log.summary.status !== "completed" ||
         execution.output === null
@@ -401,16 +450,13 @@ export default function App() {
         setMessage(`${execution.log.summary.message}${historyNotice}`);
         return;
       }
-      if (serializeProject(current.current) !== snapshot) {
-        setMessage(
-          `O modelo mudou durante a análise. Execute novamente para obter resultados atuais.${historyNotice}`,
-        );
-        return;
-      }
-      setResult(parseOofemOutput(execution.output, input));
-      setDisplay(spatial ? "deformed" : "m");
+      const completed = parseOofemOutput(execution.output, input);
+      setCaseResults((results) =>
+        new Map(results).set(completed.caseId, completed),
+      );
+      setDisplay(defaultDiagram);
       setMessage(
-        `Análise concluída · ${requestedCase}\nEquilíbrio global verificado. Consulte reações, deslocamentos e esforços.${historyNotice}`,
+        `Análise concluída · ${requestedCase.name}\nEquilíbrio global verificado. Consulte reações, deslocamentos e esforços.${historyNotice}`,
       );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
@@ -590,7 +636,12 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <small>ATRIBUIÇÕES NO PAINEL DE PROPRIEDADES</small>
+              <button
+                className="manage-loads"
+                onClick={() => setLoadEditor("patterns")}
+              >
+                <ListChecks size={14} /> Cargas e casos
+              </button>
             </div>
             <div className="ribbon-group">
               <button
@@ -612,6 +663,15 @@ export default function App() {
         )}
         {tab === "Análise" && (
           <>
+            <div className="ribbon-group">
+              <button
+                className="tool-button"
+                onClick={() => setLoadEditor("cases")}
+              >
+                <ListChecks size={21} />
+                <span>Cargas e casos</span>
+              </button>
+            </div>
             <div className="ribbon-group">
               <button className="tool-button" onClick={exportDeck}>
                 <Download size={21} />
@@ -688,11 +748,7 @@ export default function App() {
               aria-label="Caso de análise"
               disabled={running}
               value={caseId}
-              onChange={(e) => {
-                setCaseId(e.target.value);
-                setResult(null);
-                setDisplay("model");
-              }}
+              onChange={(e) => selectAnalysisCase(e.target.value)}
             >
               {p.analysisCases.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -918,6 +974,7 @@ export default function App() {
           <Results
             project={p}
             result={result}
+            caseName={analysisCase.name}
             message={message}
             running={running}
             cancelling={activeRun?.cancelling ?? false}
@@ -995,6 +1052,27 @@ export default function App() {
       )}
       {showRunHistory && (
         <RunHistory latest={lastLog} onClose={() => setShowRunHistory(false)} />
+      )}
+      {loadEditor && (
+        <LoadDefinitions
+          project={p}
+          initialPage={loadEditor}
+          initialPatternId={patternId}
+          initialCaseId={caseId}
+          onClose={() => setLoadEditor(null)}
+          onApply={(definitions, nextPatternId, nextCaseId) => {
+            const problem = edit((project) => {
+              project.loadPatterns = definitions.loadPatterns;
+              project.analysisCases = definitions.analysisCases;
+            });
+            if (problem) return problem;
+            setPatternId(nextPatternId);
+            setCaseId(nextCaseId);
+            setDisplay("model");
+            setMessage("Definições de carga aplicadas.");
+            return null;
+          }}
+        />
       )}
       {launchDialog === "guides" && (
         <GuideEditor

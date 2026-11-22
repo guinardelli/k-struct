@@ -23,7 +23,7 @@ Cada vista de lançamento usa um plano ortogonal em uma posição de referência
 
 IDs do projeto são persistentes. IDs numéricos do OOFEM são reconstruídos a cada exportação. Uma barra é dividida em oito elementos por padrão. Nós intermediários da análise não aparecem como objetos editáveis. A propriedade `segmentsPerMember` aceita de 2 a 32 segmentos. Versões futuras precisam avaliar convergência e melhorar a amostragem dos diagramas.
 
-Padrão de carga armazena ações. Caso de análise contém seus fatores e o procedimento. A primeira interface edita os padrões existentes e escolhe o caso existente. Criação de novos casos, combinações e fontes de massa terá telas e contratos próprios. Combinação de resultados não deve ser confundida com combinação de cargas nem com fonte de massa.
+O padrão de carga armazena ações. O caso de análise seleciona os padrões, os fatores e o procedimento. O editor de definições aplica as mudanças de padrões e casos em uma única edição no esquema v2. Antes de excluir um padrão, retire suas parcelas dos casos que o referenciam. Combinações de resultados e fontes de massa terão contratos próprios.
 
 ## Unidades e sinais
 
@@ -42,8 +42,8 @@ As tabelas apresentam estações da malha. Deformadas e diagramas são linhas in
 ## Consistência
 
 - Um objeto de projeto validado é a única fonte de verdade das vistas e propriedades.
-- Edição gera uma nova versão imutável do projeto e invalida resultados.
-- A resposta de uma análise em andamento só é aceita se o conteúdo do projeto continuar igual.
+- Os resultados de casos estáticos ficam em memória por ID do caso durante a revisão atual. Os CSVs registram o nome e o ID do caso consultado. Os arquivos de projeto armazenam as definições de carga.
+- Edição, desfazer, refazer e substituir o projeto avançam a revisão e invalidam todos os resultados. A resposta de uma análise em andamento é aceita apenas na revisão em que foi solicitada.
 - Arquivos não podem configurar executáveis nem introduzir comandos. A seleção do OOFEM fica nas preferências locais.
 - O runner usa argumentos separados, sem shell, um diretório temporário por execução, prazo de 60 s e limite de 32 MB por saída. Encerra e aguarda o processo em cancelamentos e ao atingir o prazo.
 - O Tauri reserva a execução antes de habilitar o cancelamento e publica o resultado em um canal IPC. Os registros locais têm escrita atômica e retenção de 30 execuções.

@@ -12,6 +12,7 @@ import { exportFile } from "../solver/desktop";
 export default function Results({
   project,
   result,
+  caseName,
   message,
   running,
   cancelling,
@@ -19,6 +20,7 @@ export default function Results({
 }: {
   project: Project;
   result: AnalysisResult | null;
+  caseName: string;
   message: string;
   running: boolean;
   cancelling: boolean;
@@ -138,12 +140,17 @@ export default function Results({
           )}
           {result && (
             <>
+              <span className="result-case-name" title={caseName}>
+                {caseName}
+              </span>
               <span>
                 <CheckCircle2 size={13} /> {result.solver}
               </span>
               <button
                 title="Baixar saída original do OOFEM"
-                onClick={() => download("oofem-analysis.out", result.rawOutput)}
+                onClick={() =>
+                  download(`oofem-${result.caseId}.out`, result.rawOutput)
+                }
               >
                 Saída OOFEM
               </button>
@@ -151,9 +158,16 @@ export default function Results({
                 <button
                   onClick={() =>
                     download(
-                      `kstruct-${tab}.csv`,
+                      `kstruct-${result.caseId}-${tab}.csv`,
                       "\uFEFF" +
-                        [headers, ...rows]
+                        [
+                          [...headers, "Caso", "ID do caso"],
+                          ...rows.map((row) => [
+                            ...row,
+                            caseName,
+                            result.caseId,
+                          ]),
+                        ]
                           .map((r) =>
                             r
                               .map((v) =>
@@ -201,7 +215,7 @@ export default function Results({
               : tab === "reactions"
                 ? "as reações"
                 : "os deslocamentos"}{" "}
-            do modelo atual.
+            do caso <b>{caseName}</b>.
           </div>
         ) : (
           <table>
