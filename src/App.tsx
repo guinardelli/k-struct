@@ -790,6 +790,7 @@ export default function App() {
           <label>
             Caso ou combinação
             <select
+              aria-label="Caso ou combinação"
               disabled={running}
               value={combination ? `combination:${combination.id}` : caseId}
               onChange={(e) => selectResult(e.target.value)}
