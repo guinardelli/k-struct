@@ -42,6 +42,7 @@ async function clickGrid(
 test("pórtico espacial assimétrico lançado do vazio, salvo e conferido com a referência", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");

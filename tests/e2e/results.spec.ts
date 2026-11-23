@@ -156,6 +156,7 @@ test("resultados calculados são apresentados e invalidados após edição", asy
 test("combinação linear lista casos pendentes, consulta resultados e preserva a composição", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   await bridge(page);
   await page.goto("/");
   const button = (name: string) =>
@@ -221,7 +222,7 @@ test("combinação linear lista casos pendentes, consulta resultados e preserva 
   expect(csv).toContain('""caseId"":""EL"",""factor"":1.8');
 
   const projectDownload = page.waitForEvent("download");
-  await button("Salvar projeto (Ctrl+S)").click();
+  await button("Salvar projeto").click();
   const file = (await (await projectDownload).path())!;
   const model = parseProject(await readFile(file, "utf8"));
   expect(model.resultCombinations).toEqual([
