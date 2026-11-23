@@ -8,6 +8,7 @@ import {
   uniformLoad,
   type Project,
 } from "../src/domain/model";
+import { combineLinearResults } from "../src/solver/combinations";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
 import portal from "./fixtures/portal-planar.json";
 import portalExpected from "./fixtures/portal-expected.json";
@@ -18,8 +19,8 @@ import {
 } from "./fixtures/spatial-benchmark";
 
 const executable = process.env.OOFEM_BIN;
-function solve(p: Project) {
-  const input = exportOofem(p, "EL");
+function solve(p: Project, caseId = "EL") {
+  const input = exportOofem(p, caseId);
   return parseOofemOutput(runDeck(input.deck, executable!), input);
 }
 
@@ -207,4 +208,112 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     const model = spatialBenchmark();
     expect(spatialBenchmarkDifferences(model, solve(model))).toEqual([]);
   });
+  it.each([
+    ["viga plana", beamExample],
+    ["pórtico espacial", spatialBenchmark],
+  ] as const)(
+    "combinação em %s reproduz um caso direto do OOFEM",
+    (_, create) => {
+      const p = create();
+      const permanent = p.loadPatterns[0];
+      const secondary = permanent.nodal.length
+        ? permanent.nodal
+        : [{ ...nodalLoad("B"), fx: 1400, my: 480 }];
+      permanent.nodal = [];
+      p.loadPatterns.push({
+        id: "W",
+        name: "Ações nodais",
+        nodal: secondary,
+        uniform: [],
+      });
+      const factors = (g: number, w: number) => [
+        { patternId: permanent.id, factor: g },
+        { patternId: "W", factor: w },
+      ];
+      const [first] = p.analysisCases;
+      first.factors = factors(1.2, 0.25);
+      p.analysisCases.push(
+        {
+          ...first,
+          id: "W",
+          name: "Segundo caso",
+          factors: factors(-0.5, 0.75),
+        },
+        {
+          ...first,
+          id: "DIRECT",
+          name: "Ações equivalentes",
+          factors: factors(2.2, -0.225),
+        },
+      );
+      p.resultCombinations.push({
+        id: "C1",
+        name: "Combinação de referência",
+        type: "linear",
+        factors: [
+          { caseId: first.id, factor: 1.5 },
+          { caseId: "W", factor: -0.8 },
+        ],
+      });
+      const results = new Map(
+        p.analysisCases.slice(0, 2).map(({ id }) => [id, solve(p, id)]),
+      );
+      const combined = combineLinearResults(
+        p,
+        p.resultCombinations[0],
+        results,
+      );
+      const direct = solve(p, "DIRECT");
+
+      for (const [id, expected] of Object.entries(direct.displacements)) {
+        for (const dof of ["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+          expect(combined.displacements[id][dof], `${id}.${dof}`).toBeCloseTo(
+            expected[dof],
+            8,
+          );
+      }
+      const compareForce = (actual: number, expected: number, label: string) =>
+        expect(Math.abs(actual - expected), label).toBeLessThan(
+          0.1 + Math.abs(expected) * 1e-4,
+        );
+      for (const expected of direct.reactions) {
+        const actual = combined.reactions.find(
+          ({ nodeId }) => nodeId === expected.nodeId,
+        )!;
+        for (const component of ["fx", "fy", "fz", "mx", "my", "mz"] as const)
+          compareForce(
+            actual[component],
+            expected[component],
+            `${expected.nodeId}.${component}`,
+          );
+      }
+      for (const [id, stations] of Object.entries(direct.members)) {
+        expect(combined.members[id]).toHaveLength(stations.length);
+        for (const [index, expected] of stations.entries()) {
+          const actual = combined.members[id][index];
+          expect(actual.t).toBe(expected.t);
+          for (const dof of ["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+            expect(actual[dof], `${id}[${index}].${dof}`).toBeCloseTo(
+              expected[dof],
+              8,
+            );
+          for (const component of [
+            "n",
+            "v",
+            "m",
+            "vy",
+            "vz",
+            "mx",
+            "my",
+            "mz",
+          ] as const)
+            compareForce(
+              actual[component],
+              expected[component],
+              `${id}[${index}].${component}`,
+            );
+        }
+      }
+    },
+  );
 });

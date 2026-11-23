@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { parseProject } from "../../src/domain/model";
 
 // Only the IPC boundary is substituted. This is a captured result from the real
 // OOFEM benchmark, not an alternative solver or a fallback in the application.
@@ -149,6 +151,111 @@ test("resultados calculados são apresentados e invalidados após edição", asy
   await expect(page.getByRole("cell", { name: "45", exact: true })).toHaveCount(
     0,
   );
+});
+
+test("combinação linear lista casos pendentes, consulta resultados e preserva a composição", async ({
+  page,
+}) => {
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await page.getByRole("button", { name: /Viga de referência/ }).click();
+  await button("Cargas e casos").click();
+  const editor = page.getByRole("dialog", {
+    name: "Padrões, casos e combinações",
+  });
+  const editButton = (name: string) =>
+    editor.getByRole("button", { name, exact: true });
+  await editButton("Casos estáticos").click();
+  await editor.getByLabel("Nome do caso").fill("Permanente");
+  await editButton("Novo caso").click();
+  await editor.getByLabel("Nome do caso").fill("Variável");
+  const secondary = await editor.getByLabel("Caso para editar").inputValue();
+  await editButton("Combinações lineares").click();
+  await editButton("Nova combinação").click();
+  await editor.getByLabel("Nome da combinação").fill("Composição 1");
+  await editor.getByLabel("Caso da parcela 1").selectOption("EL");
+  await editButton("Adicionar parcela").click();
+  await editor.getByLabel("Fator da parcela 1").fill("1,8");
+  await editor.getByLabel("Fator da parcela 2").fill("-0,3");
+  const combinationId = await editor
+    .getByLabel("Combinação para editar")
+    .inputValue();
+  await editButton("Aplicar definições").click();
+
+  const picker = page.getByLabel("Caso ou combinação", { exact: true });
+  const combo = `combination:${combinationId}`;
+  const status = page.getByRole("status");
+  await expect(picker).toHaveValue(combo);
+  await expect(status).toContainText("Permanente, Variável");
+  await expect(button("Analisar")).toBeDisabled();
+  await picker.selectOption("EL");
+  await button("Analisar").click();
+  await expect(status).toContainText("Análise concluída · Permanente");
+  await picker.selectOption(combo);
+  await expect(status).toContainText(
+    /Analise os casos pendentes.*\s+Variável$/,
+  );
+  await picker.selectOption(secondary);
+  await button("Analisar").click();
+  await expect(status).toContainText("Análise concluída · Variável");
+  await picker.selectOption(combo);
+  await expect(status).toContainText("1,8 × Permanente − 0,3 × Variável");
+  await expect(page.getByLabel("Visualização dos resultados")).toHaveValue("m");
+  await expect(page.locator(".elevation polygon")).toHaveCount(1);
+  await expect(button("Saída OOFEM")).toHaveCount(0);
+  await button("Esforços").click();
+  await expect(
+    page.getByRole("cell", { name: "67,5", exact: true }),
+  ).toHaveCount(1);
+
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  const csvDownload = page.waitForEvent("download");
+  await button("CSV").click();
+  const csv = await readFile((await (await csvDownload).path())!, "utf8");
+  expect(csv).toContain(
+    '"Combinação";"ID da combinação";"Parcelas (ID do caso e fator)"',
+  );
+  expect(csv).toContain(`67.5;"Composição 1";"${combinationId}"`);
+  expect(csv).toContain('""caseId"":""EL"",""factor"":1.8');
+
+  const projectDownload = page.waitForEvent("download");
+  await button("Salvar projeto (Ctrl+S)").click();
+  const file = (await (await projectDownload).path())!;
+  const model = parseProject(await readFile(file, "utf8"));
+  expect(model.resultCombinations).toEqual([
+    {
+      id: combinationId,
+      name: "Composição 1",
+      type: "linear",
+      factors: [
+        { caseId: "EL", factor: 1.8 },
+        { caseId: secondary, factor: -0.3 },
+      ],
+    },
+  ]);
+
+  await button("Cargas e casos").click();
+  await editButton("Casos estáticos").click();
+  await editor.getByLabel("Caso para editar").selectOption(secondary);
+  await editButton("Excluir caso").click();
+  await expect(editor.getByRole("alert")).toContainText(
+    "O caso está em uso nas combinações Composição 1",
+  );
+  await editButton("Combinações lineares").click();
+  await editor.getByLabel("Fator da parcela 1").fill("2");
+  await editButton("Aplicar definições").click();
+  await expect(page.getByRole("table")).toHaveCount(0);
+  await expect(page.getByLabel("Visualização dos resultados")).toHaveValue(
+    "model",
+  );
+
+  await page.locator('input[type="file"]').setInputFiles(file);
+  await picker.selectOption(combo);
+  await button("Mensagens").click();
+  await expect(status).toContainText("1,8 × Permanente − 0,3 × Variável");
+  await expect(status).toContainText("Permanente, Variável");
 });
 
 test("resposta antiga é descartada quando o modelo muda durante a execução", async ({

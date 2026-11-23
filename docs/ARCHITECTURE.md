@@ -4,26 +4,27 @@
 
 `Projeto editável → validação → malha de análise → entrada OOFEM → processo nativo → saída normalizada → tabelas e diagramas`
 
-| Camada            | Responsabilidade                                          | Local                   |
-| ----------------- | --------------------------------------------------------- | ----------------------- |
-| Domínio           | Formato v2, migração v1, geometria, validação e histórico | `src/domain`            |
-| Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída   | `src/solver/oofem.ts`   |
-| Ponte desktop     | Abrir/salvar, configuração do motor e IPC                 | `src/solver/desktop.ts` |
-| Processo          | Diretório temporário, execução sem shell, prazo e limpeza | `crates/solver-runner`  |
-| Aplicativo nativo | Registro do comando assíncrono e permissões               | `src-tauri`             |
-| Interface         | Modelo compartilhado, vistas, propriedades e resultados   | `src/components`        |
+| Camada            | Responsabilidade                                             | Local                        |
+| ----------------- | ------------------------------------------------------------ | ---------------------------- |
+| Domínio           | Formato v3, migração v1/v2, geometria, validação e histórico | `src/domain`                 |
+| Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída      | `src/solver/oofem.ts`        |
+| Combinações       | Superposição de deslocamentos, reações e esforços estáticos  | `src/solver/combinations.ts` |
+| Ponte desktop     | Abrir/salvar, configuração do motor e IPC                    | `src/solver/desktop.ts`      |
+| Processo          | Diretório temporário, execução sem shell, prazo e limpeza    | `crates/solver-runner`       |
+| Aplicativo nativo | Registro do comando assíncrono e permissões                  | `src-tauri`                  |
+| Interface         | Modelo compartilhado, vistas, propriedades e resultados      | `src/components`             |
 
 React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os aplicativos OpenStruct. SVG é usado na elevação para seleção e desenho preciso. A perspectiva usa Three.js, renderizando apenas quando o modelo, câmera ou tamanho mudam.
 
 ## Modelo próprio
 
-O esquema v2 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, padrões de carga e casos de análise. O modo `planar` usa Y = 0 e UX/UZ/RY. O modo `spatial` usa UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos.
+O esquema v3 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, padrões de carga, casos de análise e combinações de resultados. O modo `planar` usa Y = 0 e UX/UZ/RY. O modo `spatial` usa UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. O snap prioriza nós do plano, depois eixos e pavimentos próximos, e usa uma malha de 0,50 m como passo. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
 IDs do projeto são persistentes. IDs numéricos do OOFEM são reconstruídos a cada exportação. Uma barra é dividida em oito elementos por padrão. Nós intermediários da análise não aparecem como objetos editáveis. A propriedade `segmentsPerMember` aceita de 2 a 32 segmentos. Versões futuras precisam avaliar convergência e melhorar a amostragem dos diagramas.
 
-O padrão de carga armazena ações. O caso de análise seleciona os padrões, os fatores e o procedimento. O editor de definições aplica as mudanças de padrões e casos em uma única edição no esquema v2. Antes de excluir um padrão, retire suas parcelas dos casos que o referenciam. Combinações de resultados e fontes de massa terão contratos próprios.
+O padrão de carga armazena ações. O caso de análise seleciona os padrões, os fatores e o procedimento. A combinação linear armazena IDs de casos estáticos e os respectivos fatores. O editor aplica as mudanças de padrões, casos e combinações em uma única edição. Antes de excluir um padrão ou caso, retire suas referências das definições que o utilizam.
 
 ## Unidades e sinais
 
@@ -42,7 +43,8 @@ As tabelas apresentam estações da malha. Deformadas e diagramas são linhas in
 ## Consistência
 
 - Um objeto de projeto validado é a única fonte de verdade das vistas e propriedades.
-- Os resultados de casos estáticos ficam em memória por ID do caso durante a revisão atual. Os CSVs registram o nome e o ID do caso consultado. Os arquivos de projeto armazenam as definições de carga.
+- Os resultados de casos estáticos ficam em memória por ID do caso durante a revisão atual. A combinação usa esses resultados, alinhando apoios e nós por ID e esforços por barra e posição na malha. Parcelas com fator zero dispensam uma análise do caso correspondente.
+- O CSV registra o nome e o ID do caso ou combinação. Para combinações, a coluna de parcelas também registra cada ID de caso e fator. Os arquivos de projeto armazenam as definições de carga e de combinação.
 - Edição, desfazer, refazer e substituir o projeto avançam a revisão e invalidam todos os resultados. A resposta de uma análise em andamento é aceita apenas na revisão em que foi solicitada.
 - Arquivos não podem configurar executáveis nem introduzir comandos. A seleção do OOFEM fica nas preferências locais.
 - O runner usa argumentos separados, sem shell, um diretório temporário por execução, prazo de 60 s e limite de 32 MB por saída. Encerra e aguarda o processo em cancelamentos e ao atingir o prazo.

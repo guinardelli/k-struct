@@ -4,7 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Maximize } from "lucide-react";
 import { interpolate, type Point3 } from "../domain/geometry";
 import type { Project, SelectedObject, Selection } from "../domain/model";
-import type { AnalysisResult } from "../solver/oofem";
+import type { StructuralResult } from "../solver/oofem";
 import { additiveSelection } from "./WorkPlaneView";
 
 interface SceneState {
@@ -38,7 +38,7 @@ export default function SpatialView({
 }: {
   project: Project;
   selection: SelectedObject[];
-  result: AnalysisResult | null;
+  result: StructuralResult | null;
   onSelect: (s: Selection, additive: boolean) => void;
 }) {
   const container = useRef<HTMLDivElement>(null),

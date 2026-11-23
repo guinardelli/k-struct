@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import {
   Box,
   Boxes,
@@ -69,6 +76,7 @@ import LoadDefinitions, {
   type LoadDefinitionsPage,
 } from "./components/LoadDefinitions";
 import { version } from "../package.json";
+import { combineLinearResults } from "./solver/combinations";
 import {
   exportOofem,
   parseOofemOutput,
@@ -87,6 +95,7 @@ import {
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v3") ??
       localStorage.getItem("kstruct.draft.v2") ??
       localStorage.getItem("kstruct.draft.v1");
     if (cached) return parseProject(cached);
@@ -149,13 +158,33 @@ export default function App() {
   });
   const [preferredCaseId, setCaseId] = useState(p.analysisCases[0].id),
     [preferredPatternId, setPatternId] = useState(p.loadPatterns[0].id);
+  const [preferredCombinationId, setCombinationId] = useState("");
   const analysisCase =
     p.analysisCases.find((c) => c.id === preferredCaseId) ?? p.analysisCases[0];
   const caseId = analysisCase.id;
+  const combination = p.resultCombinations.find(
+    (item) => item.id === preferredCombinationId,
+  );
   const patternId =
     p.loadPatterns.find((pattern) => pattern.id === preferredPatternId)?.id ??
     p.loadPatterns[0].id;
-  const result = caseResults.get(caseId) ?? null;
+  const caseResult = caseResults.get(caseId) ?? null;
+  const combined = useMemo(() => {
+    if (!combination) return null;
+    try {
+      return {
+        result: combineLinearResults(p, combination, caseResults),
+        problem: "",
+      };
+    } catch (error) {
+      return {
+        result: null,
+        problem: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }, [p, combination, caseResults]);
+  const result = combined ? combined.result : caseResult;
+  const visibleDisplay = result ? display : "model";
   const defaultDiagram = spatial ? "deformed" : "m";
   const [loadEditor, setLoadEditor] = useState<LoadDefinitionsPage | null>(
     null,
@@ -171,7 +200,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v2", serialized);
+      localStorage.setItem("kstruct.draft.v3", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -217,11 +246,20 @@ export default function App() {
     },
     [invalidateResults],
   );
-  const selectAnalysisCase = (id: string) => {
-    const selected = p.analysisCases.find((item) => item.id === id);
+  const selectResult = (value: string) => {
+    const selectedCombination = p.resultCombinations.find(
+      (item) => `combination:${item.id}` === value,
+    );
+    if (selectedCombination) {
+      setCombinationId(selectedCombination.id);
+      setDisplay((value) => (value === "model" ? defaultDiagram : value));
+      return;
+    }
+    const selected = p.analysisCases.find((item) => item.id === value);
     if (!selected) return;
-    setCaseId(id);
-    if (caseResults.has(id)) {
+    setCombinationId("");
+    setCaseId(selected.id);
+    if (caseResults.has(selected.id)) {
       setDisplay((value) => (value === "model" ? defaultDiagram : value));
       setMessage(`Resultados do caso ${selected.name}.`);
     } else {
@@ -256,6 +294,7 @@ export default function App() {
     setPlane("XY");
     setGuide("");
     setCaseId(project.analysisCases[0].id);
+    setCombinationId("");
     setPatternId(project.loadPatterns[0].id);
     setSaved(serializeProject(project));
     setMessage(`Projeto aberto: ${project.name}.`);
@@ -666,14 +705,20 @@ export default function App() {
             <div className="ribbon-group">
               <button
                 className="tool-button"
-                onClick={() => setLoadEditor("cases")}
+                onClick={() =>
+                  setLoadEditor(combination ? "combinations" : "cases")
+                }
               >
                 <ListChecks size={21} />
                 <span>Cargas e casos</span>
               </button>
             </div>
             <div className="ribbon-group">
-              <button className="tool-button" onClick={exportDeck}>
+              <button
+                className="tool-button"
+                onClick={exportDeck}
+                disabled={Boolean(combination)}
+              >
                 <Download size={21} />
                 <span>Entrada OOFEM</span>
               </button>
@@ -743,23 +788,33 @@ export default function App() {
         )}
         <div className="run-group">
           <label>
-            Caso de análise
+            Caso ou combinação
             <select
-              aria-label="Caso de análise"
               disabled={running}
-              value={caseId}
-              onChange={(e) => selectAnalysisCase(e.target.value)}
+              value={combination ? `combination:${combination.id}` : caseId}
+              onChange={(e) => selectResult(e.target.value)}
             >
-              {p.analysisCases.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
+              <optgroup label="Casos estáticos">
+                {p.analysisCases.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+              {p.resultCombinations.length > 0 && (
+                <optgroup label="Combinações lineares">
+                  {p.resultCombinations.map((item) => (
+                    <option key={item.id} value={`combination:${item.id}`}>
+                      {item.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </label>
           <button
             className="run-button"
-            disabled={running}
+            disabled={running || Boolean(combination)}
             onClick={() => void run()}
           >
             <Play size={15} fill="currentColor" />
@@ -894,7 +949,7 @@ export default function App() {
             </div>
             <select
               aria-label="Visualização dos resultados"
-              value={display}
+              value={visibleDisplay}
               onChange={(e) => setDisplay(e.target.value as Display)}
             >
               <option value="model">Geometria e cargas</option>
@@ -947,7 +1002,7 @@ export default function App() {
               selection={selection}
               tool={tool}
               result={result}
-              display={display}
+              display={visibleDisplay}
               patternId={patternId}
               pending={pending}
               onPoint={onPoint}
@@ -957,14 +1012,14 @@ export default function App() {
               <SpatialView
                 project={p}
                 selection={selection}
-                result={display === "deformed" ? result : null}
+                result={visibleDisplay === "deformed" ? result : null}
                 onSelect={selectObject}
               />
             )}
           </div>
-          {display !== "model" && result && (
+          {visibleDisplay !== "model" && (
             <div className="diagram-caption">
-              {display === "deformed"
+              {visibleDisplay === "deformed"
                 ? "Deformada ampliada automaticamente. Valores reais na tabela de deslocamentos."
                 : spatial
                   ? "Esforços nos eixos locais, na face positiva de x. N positivo em tração. O diagrama é desenhado no plano ativo."
@@ -973,8 +1028,11 @@ export default function App() {
           )}
           <Results
             project={p}
-            result={result}
-            caseName={analysisCase.name}
+            view={
+              combination && combined
+                ? { kind: "combination", definition: combination, ...combined }
+                : { kind: "case", definition: analysisCase, result: caseResult }
+            }
             message={message}
             running={running}
             cancelling={activeRun?.cancelling ?? false}
@@ -994,7 +1052,9 @@ export default function App() {
         <span>
           <ShieldCheck size={13} />
           {result
-            ? "Análise concluída"
+            ? combination
+              ? "Combinação disponível"
+              : "Análise concluída"
             : running
               ? "Análise em andamento"
               : "Modelo em edição"}
@@ -1059,15 +1119,25 @@ export default function App() {
           initialPage={loadEditor}
           initialPatternId={patternId}
           initialCaseId={caseId}
+          initialCombinationId={
+            combination?.id ?? p.resultCombinations[0]?.id ?? ""
+          }
           onClose={() => setLoadEditor(null)}
-          onApply={(definitions, nextPatternId, nextCaseId) => {
+          onApply={(
+            definitions,
+            nextPatternId,
+            nextCaseId,
+            nextCombinationId,
+          ) => {
             const problem = edit((project) => {
               project.loadPatterns = definitions.loadPatterns;
               project.analysisCases = definitions.analysisCases;
+              project.resultCombinations = definitions.resultCombinations;
             });
             if (problem) return problem;
             setPatternId(nextPatternId);
             setCaseId(nextCaseId);
+            setCombinationId(nextCombinationId);
             setDisplay("model");
             setMessage("Definições de carga aplicadas.");
             return null;

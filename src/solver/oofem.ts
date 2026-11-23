@@ -64,13 +64,15 @@ export interface Station extends Displacement {
   my: number;
   mz: number;
 }
-export interface AnalysisResult {
-  caseId: string;
-  solver: string;
-  completedAt: string;
+export interface StructuralResult {
   displacements: Record<string, Displacement>;
   reactions: Reaction[];
   members: Record<string, Station[]>;
+}
+export interface AnalysisResult extends StructuralResult {
+  caseId: string;
+  solver: string;
+  completedAt: string;
   rawOutput: string;
 }
 

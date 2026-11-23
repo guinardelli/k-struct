@@ -26,7 +26,9 @@ test("pórtico com casos vertical e vento Y salvos e consultados separadamente",
   });
   await expect(page.locator(".model-count")).toHaveText("9 nós · 11 barras");
   await button(page, "Cargas e casos").click();
-  const editor = page.getByRole("dialog", { name: "Padrões e casos de carga" });
+  const editor = page.getByRole("dialog", {
+    name: "Padrões, casos e combinações",
+  });
   await editor.getByRole("button", { name: "Novo padrão" }).click();
   await editor.getByLabel("Nome do padrão").fill("Vento Y");
   await editor.getByLabel("Padrão para editar").selectOption("G");
@@ -52,7 +54,7 @@ test("pórtico com casos vertical e vento Y salvos e consultados separadamente",
   await editor.getByRole("button", { name: "Aplicar definições" }).click();
   await expect(editor).not.toBeVisible();
 
-  const casePicker = page.getByLabel("Caso de análise", { exact: true });
+  const casePicker = page.getByLabel("Caso ou combinação", { exact: true });
   const patternPicker = page.getByLabel("Padrão de cargas", { exact: true });
   await button(page, "Desfazer").click();
   await expect(casePicker).toHaveValue("EL");
@@ -77,7 +79,7 @@ test("pórtico com casos vertical e vento Y salvos e consultados separadamente",
   const model = parseProject(await readFile(path, "utf8"));
   const [permanent, wind] = model.loadPatterns;
   const [vertical, lateral] = model.analysisCases;
-  expect(model.schemaVersion).toBe(2);
+  expect(model.schemaVersion).toBe(3);
   expect(permanent.uniform).toMatchObject([{ memberId: "B5", qz: -4500 }]);
   expect(permanent.nodal).toEqual([]);
   expect(wind.nodal).toMatchObject([{ nodeId: "N5", fy: 12000 }]);
@@ -225,12 +227,14 @@ test("excluir definições é uma edição única e recuperável", async ({
 }) => {
   await page.goto("/");
   await button(page, "Cargas e casos").click();
-  const editor = page.getByRole("dialog", { name: "Padrões e casos de carga" });
+  const editor = page.getByRole("dialog", {
+    name: "Padrões, casos e combinações",
+  });
   await editor.getByRole("button", { name: "Novo padrão" }).click();
   await editor.getByRole("button", { name: "Casos estáticos" }).click();
   await editor.getByRole("button", { name: "Novo caso" }).click();
   await editor.getByRole("button", { name: "Aplicar definições" }).click();
-  const casePicker = page.getByLabel("Caso de análise", { exact: true });
+  const casePicker = page.getByLabel("Caso ou combinação", { exact: true });
   const patternPicker = page.getByLabel("Padrão de cargas", { exact: true });
   const [caseId, patternId] = await Promise.all([
     casePicker.inputValue(),

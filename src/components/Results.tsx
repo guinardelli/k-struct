@@ -1,26 +1,34 @@
 import { useState } from "react";
 import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
-import type { Project } from "../domain/model";
+import type { AnalysisCase, Project, ResultCombination } from "../domain/model";
 import type {
   AnalysisResult,
   Displacement,
   Reaction,
   Station,
+  StructuralResult,
 } from "../solver/oofem";
 import { exportFile } from "../solver/desktop";
 
+type ResultView =
+  | { kind: "case"; definition: AnalysisCase; result: AnalysisResult | null }
+  | {
+      kind: "combination";
+      definition: ResultCombination;
+      result: StructuralResult | null;
+      problem: string;
+    };
+
 export default function Results({
   project,
-  result,
-  caseName,
+  view,
   message,
   running,
   cancelling,
   openRunHistory,
 }: {
   project: Project;
-  result: AnalysisResult | null;
-  caseName: string;
+  view: ResultView;
   message: string;
   running: boolean;
   cancelling: boolean;
@@ -28,6 +36,22 @@ export default function Results({
 }) {
   const [tab, setTab] = useState("log");
   const [exportError, setExportError] = useState("");
+  const { definition, result } = view;
+  const caseOutput = view.kind === "case" ? view.result : null;
+  const combination = view.kind === "combination" ? view.definition : null;
+  const caseNames = new Map(
+    project.analysisCases.map(({ id, name }) => [id, name]),
+  );
+  const formula = combination?.factors
+    .map(({ caseId, factor }, i) => {
+      const sign = factor < 0 ? "− " : i ? "+ " : "";
+      return `${sign}${String(Math.abs(factor)).replace(".", ",")} × ${caseNames.get(caseId) ?? caseId}`;
+    })
+    .join(" ");
+  const logMessage =
+    view.kind === "combination"
+      ? `${definition.name}\n${formula}\n${view.problem || "Combinação disponível para consulta."}`
+      : message;
   const download = (name: string, content: string, type = "text/plain") => {
     setExportError("");
     void exportFile(name, content, type).catch((e) =>
@@ -140,33 +164,48 @@ export default function Results({
           )}
           {result && (
             <>
-              <span className="result-case-name" title={caseName}>
-                {caseName}
+              <span
+                className="result-case-name"
+                title={formula ?? definition.name}
+              >
+                {definition.name}
               </span>
               <span>
-                <CheckCircle2 size={13} /> {result.solver}
+                <CheckCircle2 size={13} />{" "}
+                {caseOutput?.solver ?? "Combinação linear"}
               </span>
-              <button
-                title="Baixar saída original do OOFEM"
-                onClick={() =>
-                  download(`oofem-${result.caseId}.out`, result.rawOutput)
-                }
-              >
-                Saída OOFEM
-              </button>
-              {tab !== "log" && (
+              {caseOutput && (
                 <button
+                  title="Baixar saída original do OOFEM"
                   onClick={() =>
                     download(
-                      `kstruct-${result.caseId}-${tab}.csv`,
+                      `oofem-${caseOutput.caseId}.out`,
+                      caseOutput.rawOutput,
+                    )
+                  }
+                >
+                  Saída OOFEM
+                </button>
+              )}
+              {tab !== "log" && (
+                <button
+                  onClick={() => {
+                    const sourceHeaders = combination
+                      ? [
+                          "Combinação",
+                          "ID da combinação",
+                          "Parcelas (ID do caso e fator)",
+                        ]
+                      : ["Caso", "ID do caso"];
+                    const source = [definition.name, definition.id];
+                    if (combination)
+                      source.push(JSON.stringify(combination.factors));
+                    download(
+                      `kstruct-${combination ? "combinacao-" : ""}${definition.id}-${tab}.csv`,
                       "\uFEFF" +
                         [
-                          [...headers, "Caso", "ID do caso"],
-                          ...rows.map((row) => [
-                            ...row,
-                            caseName,
-                            result.caseId,
-                          ]),
+                          [...headers, ...sourceHeaders],
+                          ...rows.map((row) => [...row, ...source]),
                         ]
                           .map((r) =>
                             r
@@ -179,8 +218,8 @@ export default function Results({
                           )
                           .join("\n"),
                       "text/csv",
-                    )
-                  }
+                    );
+                  }}
                 >
                   <FileDown size={13} />
                   CSV
@@ -204,9 +243,11 @@ export default function Results({
                 ? "Cancelando execução do OOFEM…"
                 : running
                   ? "OOFEM em execução…"
-                  : message}
+                  : logMessage}
             </pre>
           </div>
+        ) : !result && view.kind === "combination" ? (
+          <div className="no-results">{view.problem.replace("\n", " ")}</div>
         ) : !result ? (
           <div className="no-results">
             Execute uma análise para consultar{" "}
@@ -215,7 +256,7 @@ export default function Results({
               : tab === "reactions"
                 ? "as reações"
                 : "os deslocamentos"}{" "}
-            do caso <b>{caseName}</b>.
+            do caso <b>{definition.name}</b>.
           </div>
         ) : (
           <table>

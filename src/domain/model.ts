@@ -104,7 +104,7 @@ const legacySchema = z
       .strict(),
   })
   .strict();
-export const projectSchema = legacySchema.extend({
+const spatialSchema = legacySchema.extend({
   schemaVersion: z.literal(2),
   mode: z.enum(["planar", "spatial"]),
   nodes: z.array(nodeSchema).max(1000),
@@ -118,8 +118,28 @@ export const projectSchema = legacySchema.extend({
     })
     .strict(),
 });
+export const projectSchema = spatialSchema.extend({
+  schemaVersion: z.literal(3),
+  resultCombinations: z
+    .array(
+      z
+        .object({
+          id,
+          name: text,
+          type: z.literal("linear"),
+          factors: z
+            .array(z.object({ caseId: id, factor: finite }).strict())
+            .min(1)
+            .max(100),
+        })
+        .strict(),
+    )
+    .max(100),
+});
 
 export type Project = z.infer<typeof projectSchema>;
+export type AnalysisCase = Project["analysisCases"][number];
+export type ResultCombination = Project["resultCombinations"][number];
 export type StructuralNode = Project["nodes"][number];
 export type Member = Project["members"][number];
 export type NodalLoad = Project["loadPatterns"][number]["nodal"][number];
@@ -171,7 +191,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: uid(),
     name: "Projeto sem título",
     units: "N-m-kg-s",
@@ -202,6 +222,7 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
         factors: [{ patternId: "G", factor: 1 }],
       },
     ],
+    resultCombinations: [],
     mesh: { segmentsPerMember: 8 },
   };
 }
@@ -252,9 +273,10 @@ export function parseProject(source: string): Project {
     const v1 = legacy.data;
     value = {
       ...v1,
-      schemaVersion: 2,
+      schemaVersion: 3,
       mode: "planar",
       guides: defaultGuides(),
+      resultCombinations: [],
       nodes: v1.nodes.map((n) => ({
         ...n,
         restraints: { ...free(), ...n.restraints },
@@ -266,11 +288,20 @@ export function parseProject(source: string): Project {
         uniform: p.uniform.map((l) => ({ ...uniformLoad(l.memberId), ...l })),
       })),
     };
+  } else if (
+    value !== null &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 2
+  ) {
+    const v2 = spatialSchema.safeParse(value);
+    if (v2.success)
+      value = { ...v2.data, schemaVersion: 3, resultCombinations: [] };
   }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct versão 1 ou 2, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct versão 1, 2 ou 3, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -286,6 +317,7 @@ export function referenceErrors(p: Project): string[] {
     p.sections,
     p.loadPatterns,
     p.analysisCases,
+    p.resultCombinations,
     ...Object.values(p.guides),
   ]) {
     if (new Set(list.map((v) => v.id)).size !== list.length)
@@ -324,6 +356,22 @@ export function referenceErrors(p: Project): string[] {
       c.factors.some((f) => !p.loadPatterns.some((l) => l.id === f.patternId))
     )
       errors.push(`${c.name}: padrão de carga inexistente.`);
+  const cases = new Set(p.analysisCases.map((item) => item.id));
+  for (const combination of p.resultCombinations) {
+    const caseIds = combination.factors.map((term) => term.caseId);
+    if (caseIds.some((caseId) => !cases.has(caseId)))
+      errors.push(
+        `A combinação ${combination.name} referencia um caso estático inexistente.`,
+      );
+    if (new Set(caseIds).size !== caseIds.length)
+      errors.push(
+        `Use cada caso em uma única parcela da combinação ${combination.name}.`,
+      );
+    if (!combination.factors.some((term) => term.factor !== 0))
+      errors.push(
+        `Informe pelo menos um fator diferente de zero na combinação ${combination.name}.`,
+      );
+  }
   return errors;
 }
 

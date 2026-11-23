@@ -2,17 +2,26 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { nextName, uid, type Project } from "../domain/model";
 
-export type LoadDefinitionsPage = "patterns" | "cases";
-type Definitions = Pick<Project, "loadPatterns" | "analysisCases">;
-type DraftCase = Omit<Definitions["analysisCases"][number], "factors"> & {
-  factors: { patternId: string; factor: string }[];
+export type LoadDefinitionsPage = "patterns" | "cases" | "combinations";
+type Definitions = Pick<
+  Project,
+  "loadPatterns" | "analysisCases" | "resultCombinations"
+>;
+type DraftFactor = { sourceId: string; factor: string };
+type DraftDefinition = {
+  id: string;
+  name: string;
+  factors: DraftFactor[];
 };
+const parseFactor = (value: string) =>
+  value.trim() ? Number(value.replace(",", ".")) : NaN;
 
 export default function LoadDefinitions({
   project,
   initialPage,
   initialPatternId,
   initialCaseId,
+  initialCombinationId,
   onApply,
   onClose,
 }: {
@@ -20,29 +29,54 @@ export default function LoadDefinitions({
   initialPage: LoadDefinitionsPage;
   initialPatternId: string;
   initialCaseId: string;
+  initialCombinationId: string;
   onApply: (
     definitions: Definitions,
     patternId: string,
     caseId: string,
+    combinationId: string,
   ) => string | null;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [page, setPage] = useState(initialPage);
   const [patterns, setPatterns] = useState(project.loadPatterns);
-  const [cases, setCases] = useState<DraftCase[]>(() =>
-    project.analysisCases.map((item) => ({
-      ...item,
-      factors: item.factors.map((f) => ({ ...f, factor: String(f.factor) })),
+  const [cases, setCases] = useState<DraftDefinition[]>(() =>
+    project.analysisCases.map(({ id, name, factors }) => ({
+      id,
+      name,
+      factors: factors.map(({ patternId, factor }) => ({
+        sourceId: patternId,
+        factor: String(factor),
+      })),
+    })),
+  );
+  const [combinations, setCombinations] = useState<DraftDefinition[]>(() =>
+    project.resultCombinations.map(({ id, name, factors }) => ({
+      id,
+      name,
+      factors: factors.map(({ caseId, factor }) => ({
+        sourceId: caseId,
+        factor: String(factor),
+      })),
     })),
   );
   const [patternId, setPatternId] = useState(initialPatternId);
   const [caseId, setCaseId] = useState(initialCaseId);
+  const [combinationId, setCombinationId] = useState(initialCombinationId);
   const [error, setError] = useState("");
   const pattern = patterns.find((item) => item.id === patternId)!;
-  const analysisCase = cases.find((item) => item.id === caseId)!;
-  const availablePattern = patterns.find((p) =>
-    analysisCase.factors.every((f) => f.patternId !== p.id),
+  const editingCase = page === "cases";
+  const definitions = editingCase ? cases : combinations;
+  const setDefinitions = editingCase ? setCases : setCombinations;
+  const definitionId = editingCase ? caseId : combinationId;
+  const setDefinitionId = editingCase ? setCaseId : setCombinationId;
+  const definition = definitions.find((item) => item.id === definitionId);
+  const definitionLabel = editingCase ? "Caso" : "Combinação";
+  const sources = editingCase ? patterns : cases;
+  const sourceLabel = editingCase ? "Padrão" : "Caso";
+  const availableSource = sources.find((source) =>
+    definition?.factors.every((f) => f.sourceId !== source.id),
   );
 
   useEffect(() => {
@@ -62,7 +96,7 @@ export default function LoadDefinitions({
   };
   const removePattern = () => {
     const references = cases.filter((item) =>
-      item.factors.some((f) => f.patternId === patternId),
+      item.factors.some((f) => f.sourceId === patternId),
     );
     if (references.length) {
       setError(
@@ -75,63 +109,104 @@ export default function LoadDefinitions({
     setPatternId(next[0].id);
     setError("");
   };
-  const addCase = () => {
+  const addDefinition = () => {
     const id = uid();
-    setCases([
-      ...cases,
+    setDefinitions([
+      ...definitions,
       {
         id,
-        name: nextName("Caso ", cases),
-        type: "linear-static",
-        factors: [{ patternId, factor: "1" }],
+        name: nextName(`${definitionLabel} `, definitions),
+        factors: [{ sourceId: editingCase ? patternId : caseId, factor: "1" }],
       },
     ]);
-    setCaseId(id);
+    setDefinitionId(id);
     setError("");
   };
-  const removeCase = () => {
-    const next = cases.filter((item) => item.id !== caseId);
-    setCases(next);
-    setCaseId(next[0].id);
+  const removeDefinition = () => {
+    if (editingCase) {
+      const references = combinations.filter((item) =>
+        item.factors.some((f) => f.sourceId === definitionId),
+      );
+      if (references.length) {
+        setError(
+          `O caso está em uso nas combinações ${references.map((item) => item.name).join(", ")}. Ajuste as parcelas antes de excluir o caso.`,
+        );
+        return;
+      }
+    }
+    const next = definitions.filter((item) => item.id !== definitionId);
+    setDefinitions(next);
+    setDefinitionId(next[0]?.id ?? "");
     setError("");
   };
-  const updateCase = (values: Partial<Pick<DraftCase, "name" | "factors">>) => {
-    setCases(
-      cases.map((item) => (item.id === caseId ? { ...item, ...values } : item)),
+  const updateDefinition = (
+    values: Partial<Pick<DraftDefinition, "name" | "factors">>,
+  ) => {
+    setDefinitions(
+      definitions.map((item) =>
+        item.id === definitionId ? { ...item, ...values } : item,
+      ),
     );
     setError("");
   };
-  const updateFactor = (index: number, next: DraftCase["factors"][number]) => {
-    updateCase({
-      factors: analysisCase.factors.map((f, i) => (i === index ? next : f)),
+  const updateFactor = (index: number, next: DraftFactor) => {
+    if (!definition) return;
+    updateDefinition({
+      factors: definition.factors.map((f, i) => (i === index ? next : f)),
     });
   };
   const apply = (event: FormEvent) => {
     event.preventDefault();
-    const analysisCases = cases.map((item) => ({
+    const analysisCases: Project["analysisCases"] = cases.map((item) => ({
       ...item,
       name: item.name.trim(),
-      factors: item.factors.map((f) => ({
-        patternId: f.patternId,
-        factor: f.factor.trim() ? Number(f.factor.replace(",", ".")) : NaN,
+      type: "linear-static",
+      factors: item.factors.map(({ sourceId, factor }) => ({
+        patternId: sourceId,
+        factor: parseFactor(factor),
       })),
     }));
+    const resultCombinations: Project["resultCombinations"] = combinations.map(
+      (item) => ({
+        ...item,
+        name: item.name.trim(),
+        type: "linear",
+        factors: item.factors.map(({ sourceId, factor }) => ({
+          caseId: sourceId,
+          factor: parseFactor(factor),
+        })),
+      }),
+    );
     const loadPatterns = patterns.map((item) => ({
       ...item,
       name: item.name.trim(),
     }));
-    if ([...loadPatterns, ...analysisCases].some((item) => !item.name)) {
-      setError("Informe um nome para cada padrão e caso.");
+    if (
+      [...loadPatterns, ...analysisCases, ...resultCombinations].some(
+        (item) => !item.name,
+      )
+    ) {
+      setError("Informe um nome para cada padrão, caso e combinação.");
       return;
     }
-    const invalid = analysisCases.find((item) =>
-      item.factors.some((f) => !Number.isFinite(f.factor)),
+    for (const [items, label] of [
+      [analysisCases, "no caso"],
+      [resultCombinations, "na combinação"],
+    ] as const) {
+      const invalid = items.find((item) =>
+        item.factors.some((f) => !Number.isFinite(f.factor)),
+      );
+      if (invalid) {
+        setError(`Informe fatores numéricos finitos ${label} ${invalid.name}.`);
+        return;
+      }
+    }
+    const problem = onApply(
+      { loadPatterns, analysisCases, resultCombinations },
+      patternId,
+      caseId,
+      page === "combinations" ? combinationId : "",
     );
-    if (invalid) {
-      setError(`Informe fatores numéricos finitos no caso ${invalid.name}.`);
-      return;
-    }
-    const problem = onApply({ loadPatterns, analysisCases }, patternId, caseId);
     if (problem) setError(problem);
     else onClose();
   };
@@ -146,13 +221,14 @@ export default function LoadDefinitions({
         onClose();
       }}
     >
-      <h2 id="load-editor-title">Padrões e casos de carga</h2>
+      <h2 id="load-editor-title">Padrões, casos e combinações</h2>
       <form onSubmit={apply}>
         <div className="guide-tabs" aria-label="Definições de carga">
           {(
             [
               ["patterns", "Padrões de carga"],
               ["cases", "Casos estáticos"],
+              ["combinations", "Combinações lineares"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -230,121 +306,149 @@ export default function LoadDefinitions({
         ) : (
           <div className="load-definition-fields">
             <div className="definition-picker">
-              <label>
-                Caso para editar
-                <select
-                  value={caseId}
-                  onChange={(event) => {
-                    setCaseId(event.target.value);
-                    setError("");
-                  }}
-                >
-                  {cases.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name || "Caso sem nome"}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {definition && (
+                <label>
+                  {definitionLabel} para editar
+                  <select
+                    value={definitionId}
+                    onChange={(event) => {
+                      setDefinitionId(event.target.value);
+                      setError("");
+                    }}
+                  >
+                    {definitions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name || `${definitionLabel} sem nome`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <button
                 type="button"
-                onClick={addCase}
-                disabled={cases.length >= 100}
+                onClick={addDefinition}
+                disabled={definitions.length >= 100}
               >
                 <Plus size={14} />
-                Novo caso
+                {editingCase ? "Novo caso" : "Nova combinação"}
               </button>
-              <button
-                type="button"
-                onClick={removeCase}
-                disabled={cases.length <= 1}
-              >
-                <Trash2 size={14} />
-                Excluir caso
-              </button>
+              {definition && (
+                <button
+                  type="button"
+                  onClick={removeDefinition}
+                  disabled={editingCase && cases.length <= 1}
+                >
+                  <Trash2 size={14} />
+                  {editingCase ? "Excluir caso" : "Excluir combinação"}
+                </button>
+              )}
             </div>
-            <label>
-              Nome do caso
-              <input
-                value={analysisCase.name}
-                maxLength={120}
-                onChange={(event) => updateCase({ name: event.target.value })}
-              />
-            </label>
-            <fieldset className="case-factors">
-              <legend>Padrões e fatores do caso</legend>
-              <p>
-                O caso estático aplica cada padrão multiplicado pelo fator
-                informado.
-              </p>
-              {analysisCase.factors.map((item, index) => (
-                <div className="guide-row" key={index}>
-                  <label>
-                    Padrão
-                    <select
-                      aria-label={`Padrão da parcela ${index + 1}`}
-                      value={item.patternId}
-                      onChange={(event) =>
-                        updateFactor(index, {
-                          ...item,
-                          patternId: event.target.value,
-                        })
-                      }
-                    >
-                      {patterns.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name || "Padrão sem nome"}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Fator
-                    <input
-                      aria-label={`Fator da parcela ${index + 1}`}
-                      inputMode="decimal"
-                      value={item.factor}
-                      onChange={(event) =>
-                        updateFactor(index, {
-                          ...item,
-                          factor: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
+            {definition ? (
+              <>
+                <label>
+                  {editingCase ? "Nome do caso" : "Nome da combinação"}
+                  <input
+                    value={definition.name}
+                    maxLength={120}
+                    onChange={(event) =>
+                      updateDefinition({ name: event.target.value })
+                    }
+                  />
+                </label>
+                <fieldset className="case-factors">
+                  <legend>
+                    {editingCase
+                      ? "Padrões e fatores do caso"
+                      : "Casos e fatores da combinação"}
+                  </legend>
+                  <p>
+                    {editingCase
+                      ? "O caso estático aplica cada padrão multiplicado pelo fator informado."
+                      : "A combinação soma os resultados dos casos estáticos, ponderados pelos fatores abaixo."}
+                  </p>
+                  {definition.factors.map((item, index) => (
+                    <div className="guide-row" key={index}>
+                      <label>
+                        {sourceLabel}
+                        <select
+                          aria-label={`${sourceLabel} da parcela ${index + 1}`}
+                          value={item.sourceId}
+                          onChange={(event) =>
+                            updateFactor(index, {
+                              ...item,
+                              sourceId: event.target.value,
+                            })
+                          }
+                        >
+                          {sources
+                            .filter(
+                              (source) =>
+                                editingCase ||
+                                source.id === item.sourceId ||
+                                definition.factors.every(
+                                  (f) => f.sourceId !== source.id,
+                                ),
+                            )
+                            .map((source) => (
+                              <option key={source.id} value={source.id}>
+                                {source.name || `${sourceLabel} sem nome`}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label>
+                        Fator
+                        <input
+                          aria-label={`Fator da parcela ${index + 1}`}
+                          inputMode="decimal"
+                          value={item.factor}
+                          onChange={(event) =>
+                            updateFactor(index, {
+                              ...item,
+                              factor: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        aria-label={`Remover parcela ${index + 1}`}
+                        disabled={definition.factors.length <= 1}
+                        onClick={() =>
+                          updateDefinition({
+                            factors: definition.factors.filter(
+                              (_, i) => i !== index,
+                            ),
+                          })
+                        }
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  ))}
                   <button
                     type="button"
-                    aria-label={`Remover parcela ${index + 1}`}
-                    disabled={analysisCase.factors.length <= 1}
-                    onClick={() =>
-                      updateCase({
-                        factors: analysisCase.factors.filter(
-                          (_, i) => i !== index,
-                        ),
-                      })
-                    }
+                    disabled={!availableSource}
+                    onClick={() => {
+                      if (availableSource)
+                        updateDefinition({
+                          factors: [
+                            ...definition.factors,
+                            { sourceId: availableSource.id, factor: "1" },
+                          ],
+                        });
+                    }}
                   >
-                    Remover
+                    <Plus size={14} />
+                    Adicionar parcela
                   </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                disabled={!availablePattern}
-                onClick={() => {
-                  if (availablePattern)
-                    updateCase({
-                      factors: [
-                        ...analysisCase.factors,
-                        { patternId: availablePattern.id, factor: "1" },
-                      ],
-                    });
-                }}
-              >
-                <Plus size={14} />
-                Adicionar parcela
-              </button>
-            </fieldset>
+                </fieldset>
+              </>
+            ) : (
+              <p>
+                Crie uma combinação para somar os resultados de casos estáticos.
+              </p>
+            )}
           </div>
         )}
         {error && (

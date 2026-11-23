@@ -56,6 +56,12 @@ O Playwright reutiliza a geometria do pórtico para cadastrar um caso vertical c
 
 Com `OOFEM_BIN`, o caso vertical tem resultante de reação de 25,654 kN em Z. O caso de vento aplica o fator de ensaio −0,75 sobre a força de 12 kN em Y e tem resultante de reação de 9 kN em Y. O teste confere as duas resultantes, alterna entre diagramas já calculados, verifica a identificação do caso no CSV e confirma a invalidação dos resultados após uma edição.
 
+## Combinações lineares
+
+A viga plana e o pórtico espacial são analisados no OOFEM 3.0 com ações distribuídas `G` e nodais `W`. Em cada modelo, `1,5 (1,2 G + 0,25 W) − 0,8 (−0,5 G + 0,75 W)` é comparado a uma análise direta com `2,2 G − 0,225 W`. A comparação cobre reações nos apoios, translações e rotações nos nós e todas as componentes de deslocamentos e esforços em cada estação das barras.
+
+As tolerâncias refletem os algarismos impressos pelo OOFEM. Para forças e momentos, o erro absoluto admitido é de 0,1 N ou N·m mais 0,01% do valor de referência. O teste de interface verifica casos pendentes, diagrama, tabela, composição no CSV, reabertura e descarte dos resultados após uma edição.
+
 ## Ainda não validado nesta etapa
 
-Flambagem/P–Δ, massas/modal, combinações/envelopes, cascas, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+Flambagem/P–Δ, massas/modal, envelopes, cascas, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.

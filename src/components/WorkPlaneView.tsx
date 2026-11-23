@@ -11,7 +11,7 @@ import {
   type WorkPlane,
 } from "../domain/geometry";
 import type { Project, SelectedObject, Selection } from "../domain/model";
-import type { AnalysisResult } from "../solver/oofem";
+import type { StructuralResult } from "../solver/oofem";
 
 export type Tool = "select" | "node" | "member";
 export type Display =
@@ -32,7 +32,7 @@ interface Props {
   orthogonal: boolean;
   selection: SelectedObject[];
   tool: Tool;
-  result: AnalysisResult | null;
+  result: StructuralResult | null;
   display: Display;
   patternId: string;
   pending: Point3 | null;
