@@ -1,6 +1,8 @@
 # Distribuição desktop
 
-O workflow [KStruct desktop packages](https://github.com/ricardocorsini/k-struct/actions/workflows/desktop-packages.yml) produz pacotes de teste a partir da `master`. Abra a execução da revisão que deseja testar e baixe o artefato da sua plataforma.
+No [Struct Launcher](https://openstruct.com.br/launcher), escolha **Verificar atualizações** e instale o KStruct pela biblioteca. O catálogo assinado distribui NSIS para Windows e AppImage para Linux, ambos x86_64. Os mesmos arquivos e seus hashes SHA-256 estão na [release assinada](https://github.com/ricardocorsini/openstruct-catalog/releases/tag/kstruct-v0.3.0).
+
+O workflow [KStruct desktop packages](https://github.com/ricardocorsini/k-struct/actions/workflows/desktop-packages.yml) também gera pacotes de verificação a partir da `master`, incluindo o .deb. Os artefatos de revisão têm a retenção indicada no workflow.
 
 | Plataforma x86-64     | Pacote                | Instalação                                                                                                                                              |
 | --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -8,7 +10,11 @@ O workflow [KStruct desktop packages](https://github.com/ricardocorsini/k-struct
 | Linux (Debian/Ubuntu) | `.deb`                | Instale com `sudo apt install ./KStruct_…_amd64.deb`. Em instalação offline, as bibliotecas de sistema exigidas pelo pacote precisam estar disponíveis. |
 | Linux                 | `.AppImage`           | Dê permissão de execução com `chmod +x KStruct_….AppImage` e abra o arquivo. Em sistemas sem FUSE, use a opção `--appimage-extract-and-run`.            |
 
-O artefato inclui `SHA256SUMS.txt`, o manifesto do OOFEM e o relatório do autoteste de cada formato. Estes pacotes alpha ficam disponíveis no Actions pelo período de retenção indicado no workflow. O instalador de teste Windows é gerado sem assinatura de código.
+Os artefatos de verificação incluem `SHA256SUMS.txt`, o manifesto do OOFEM e os relatórios dos autotestes. O Launcher verifica a assinatura Ed25519 do catálogo e os hashes dos pacotes. O instalador do Windows é gerado sem assinatura Authenticode.
+
+## Publicar uma versão
+
+Sincronize a versão dos manifestos e dos lockfiles e prepare as notas em `.github/release-notes/<tag>.md`. A alteração de `.github/source-release.json` em `master` cria a tag de origem na revisão correspondente. A publicação no hub usa a tag e o SHA exato em uma solicitação no repositório do Struct Launcher. Os dois sistemas passam pelo autoteste de instalação offline antes de liberar os pacotes.
 
 ## Conferir a instalação
 

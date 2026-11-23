@@ -1,0 +1,26 @@
+name: Prepare KStruct source release
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/source-release.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    if: github.repository == 'ricardocorsini/k-struct' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify version and create the immutable source tag
+        run: node scripts/source-release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

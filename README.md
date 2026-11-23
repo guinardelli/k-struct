@@ -6,9 +6,9 @@ KStruct faz referência à matriz de rigidez **[K]**. A direção do produto é 
 
 ![Interface inicial do KStruct](docs/images/editor.webp)
 
-## Etapa 03 · Pórticos espaciais
+## KStruct 0.3.0 alpha
 
-O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma seleção na vista de lançamento, na perspectiva 3D e no explorador. Os instaladores da etapa 02 correspondem à versão 0.2.0 alpha. O lançamento espacial está no código da etapa 03.
+O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma seleção na vista de lançamento, na perspectiva 3D e no explorador. A primeira distribuição alpha reúne o lançamento espacial e a gestão de padrões e casos estáticos.
 
 - Lançar barras e nós em planta XY ou elevações XZ/YZ, com eixos, pavimentos, modo ortogonal e snap em referências ou passos de 0,50 m.
 - Selecionar, replicar por deslocamento e conectar interseções em 3D. As cópias levam geometria, seção e orientação, com nós novos sem apoios nem cargas.
@@ -23,7 +23,7 @@ No navegador, use o editor e a exportação de entrada. O botão **Analisar** ex
 
 ## Instalar e executar
 
-Os pacotes de teste para Windows (NSIS) e Linux (.deb e AppImage) estão no workflow de empacotamento. Consulte [os downloads e o procedimento de instalação](docs/DISTRIBUTION.md).
+Encontre o KStruct no [Struct Launcher](https://openstruct.com.br/launcher). Consulte a [distribuição desktop](docs/DISTRIBUTION.md) para baixar os pacotes avulsos e conferir a instalação.
 
 Para desenvolvimento, use Node.js 22.12 ou superior.
 

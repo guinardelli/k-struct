@@ -1719,7 +1719,7 @@ dependencies = [
 
 [[package]]
 name = "k-struct"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "kstruct-solver-runner",
  "serde",
@@ -1742,7 +1742,7 @@ dependencies = [
 
 [[package]]
 name = "kstruct-solver-runner"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "flate2",
  "serde",
