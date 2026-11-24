@@ -23,7 +23,8 @@ describe("projeto versionado e edição", () => {
     expect(parseProject(serializeProject(p))).toEqual(p);
   });
   it("migra o arquivo gerado pela versão 0.2 com o contrato plano original", () => {
-    const { mode, guides, resultCombinations, ...current } = beamExample();
+    const { mode, guides, resultCombinations, resultEnvelopes, ...current } =
+      beamExample();
     const legacy = {
       ...current,
       schemaVersion: 1,
@@ -43,8 +44,9 @@ describe("projeto versionado e edição", () => {
     };
     const p = parseProject(JSON.stringify(legacy));
     expect(p.mode).toBe("planar");
-    expect(p.schemaVersion).toBe(3);
+    expect(p.schemaVersion).toBe(4);
     expect(p.resultCombinations).toEqual([]);
+    expect(p.resultEnvelopes).toEqual([]);
     expect(p.nodes.map((n) => n.id)).toEqual(["A", "B"]);
     expect(p.members[0]).toMatchObject({ id: "V1", roll: 0 });
     expect(p.loadPatterns[0].nodal[0]).toEqual({
@@ -57,9 +59,38 @@ describe("projeto versionado e edição", () => {
   it("migra o esquema v2 preservando os casos e inicia a lista de combinações vazia", () => {
     const project = createProject("spatial");
     project.analysisCases[0].factors[0].factor = -0.75;
-    const { resultCombinations, ...old } = project;
+    const { resultCombinations, resultEnvelopes, ...old } = project;
     expect(parseProject(JSON.stringify({ ...old, schemaVersion: 2 }))).toEqual(
       project,
+    );
+  });
+  it("migra o esquema v3 preservando combinações e salva envelopes pelo ID das combinações", () => {
+    const project = beamExample();
+    project.resultCombinations.push({
+      id: "C1",
+      name: "Combinação",
+      type: "linear",
+      factors: [{ caseId: "EL", factor: 1 }],
+    });
+    const { resultEnvelopes, ...old } = project;
+    expect(parseProject(JSON.stringify({ ...old, schemaVersion: 3 }))).toEqual(
+      project,
+    );
+    const envelope = {
+      id: "E1",
+      name: "Envelope de teste",
+      combinationIds: ["C1"],
+    };
+    project.resultEnvelopes = [envelope];
+    expect(parseProject(serializeProject(project))).toEqual(project);
+    envelope.combinationIds.push("C1");
+    expect(() => parseProject(serializeProject(project))).toThrow(
+      /uma única vez/,
+    );
+    envelope.combinationIds = ["C1"];
+    project.resultCombinations = [];
+    expect(() => parseProject(serializeProject(project))).toThrow(
+      /combinação inexistente/,
     );
   });
   it("persiste combinações e rejeita parcelas órfãs, repetidas ou todas nulas", () => {
@@ -86,7 +117,7 @@ describe("projeto versionado e edição", () => {
   it("recusa versões futuras, propriedades estranhas e referências quebradas", () => {
     const p = beamExample();
     expect(() =>
-      parseProject(JSON.stringify({ ...p, schemaVersion: 4 })),
+      parseProject(JSON.stringify({ ...p, schemaVersion: 5 })),
     ).toThrow();
     expect(() =>
       parseProject(JSON.stringify({ ...p, executable: "/tmp/code" })),

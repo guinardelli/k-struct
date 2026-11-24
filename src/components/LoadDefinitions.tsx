@@ -1,12 +1,27 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { nextName, uid, type Project } from "../domain/model";
+import {
+  nextName,
+  uid,
+  type Project,
+  type ResultEnvelope,
+} from "../domain/model";
 
-export type LoadDefinitionsPage = "patterns" | "cases" | "combinations";
+export type LoadDefinitionsPage =
+  | "patterns"
+  | "cases"
+  | "combinations"
+  | "envelopes";
 type Definitions = Pick<
   Project,
-  "loadPatterns" | "analysisCases" | "resultCombinations"
+  "loadPatterns" | "analysisCases" | "resultCombinations" | "resultEnvelopes"
 >;
+type DefinitionSelection = {
+  patternId: string;
+  caseId: string;
+  combinationId: string;
+  envelopeId: string;
+};
 type DraftFactor = { sourceId: string; factor: string };
 type DraftDefinition = {
   id: string;
@@ -22,6 +37,7 @@ export default function LoadDefinitions({
   initialPatternId,
   initialCaseId,
   initialCombinationId,
+  initialEnvelopeId,
   onApply,
   onClose,
 }: {
@@ -30,11 +46,10 @@ export default function LoadDefinitions({
   initialPatternId: string;
   initialCaseId: string;
   initialCombinationId: string;
+  initialEnvelopeId: string;
   onApply: (
     definitions: Definitions,
-    patternId: string,
-    caseId: string,
-    combinationId: string,
+    selection: DefinitionSelection,
   ) => string | null;
   onClose: () => void;
 }) {
@@ -61,11 +76,14 @@ export default function LoadDefinitions({
       })),
     })),
   );
+  const [envelopes, setEnvelopes] = useState(project.resultEnvelopes);
   const [patternId, setPatternId] = useState(initialPatternId);
   const [caseId, setCaseId] = useState(initialCaseId);
   const [combinationId, setCombinationId] = useState(initialCombinationId);
+  const [envelopeId, setEnvelopeId] = useState(initialEnvelopeId);
   const [error, setError] = useState("");
   const pattern = patterns.find((item) => item.id === patternId)!;
+  const envelope = envelopes.find((item) => item.id === envelopeId);
   const editingCase = page === "cases";
   const definitions = editingCase ? cases : combinations;
   const setDefinitions = editingCase ? setCases : setCombinations;
@@ -133,6 +151,16 @@ export default function LoadDefinitions({
         );
         return;
       }
+    } else {
+      const references = envelopes.filter((item) =>
+        item.combinationIds.includes(definitionId),
+      );
+      if (references.length) {
+        setError(
+          `A combinação está em uso nos envelopes ${references.map((item) => item.name).join(", ")}. Ajuste os envelopes antes de excluir a combinação.`,
+        );
+        return;
+      }
     }
     const next = definitions.filter((item) => item.id !== definitionId);
     setDefinitions(next);
@@ -154,6 +182,31 @@ export default function LoadDefinitions({
     updateDefinition({
       factors: definition.factors.map((f, i) => (i === index ? next : f)),
     });
+  };
+  const addEnvelope = () => {
+    const id = uid();
+    setEnvelopes([
+      ...envelopes,
+      { id, name: nextName("Envelope ", envelopes), combinationIds: [] },
+    ]);
+    setEnvelopeId(id);
+    setError("");
+  };
+  const removeEnvelope = () => {
+    const remaining = envelopes.filter((item) => item.id !== envelopeId);
+    setEnvelopes(remaining);
+    setEnvelopeId(remaining[0]?.id ?? "");
+    setError("");
+  };
+  const updateEnvelope = (
+    changes: Partial<Pick<ResultEnvelope, "name" | "combinationIds">>,
+  ) => {
+    setEnvelopes(
+      envelopes.map((item) =>
+        item.id === envelopeId ? { ...item, ...changes } : item,
+      ),
+    );
+    setError("");
   };
   const apply = (event: FormEvent) => {
     event.preventDefault();
@@ -181,12 +234,21 @@ export default function LoadDefinitions({
       ...item,
       name: item.name.trim(),
     }));
+    const resultEnvelopes = envelopes.map((item) => ({
+      ...item,
+      name: item.name.trim(),
+    }));
     if (
-      [...loadPatterns, ...analysisCases, ...resultCombinations].some(
-        (item) => !item.name,
-      )
+      [
+        ...loadPatterns,
+        ...analysisCases,
+        ...resultCombinations,
+        ...resultEnvelopes,
+      ].some((item) => !item.name)
     ) {
-      setError("Informe um nome para cada padrão, caso e combinação.");
+      setError(
+        "Informe um nome para cada padrão, caso, combinação e envelope.",
+      );
       return;
     }
     for (const [items, label] of [
@@ -201,11 +263,23 @@ export default function LoadDefinitions({
         return;
       }
     }
+    const emptyEnvelope = resultEnvelopes.find(
+      (item) => !item.combinationIds.length,
+    );
+    if (emptyEnvelope) {
+      setError(
+        `Selecione pelo menos uma combinação para o envelope ${emptyEnvelope.name}.`,
+      );
+      return;
+    }
     const problem = onApply(
-      { loadPatterns, analysisCases, resultCombinations },
-      patternId,
-      caseId,
-      page === "combinations" ? combinationId : "",
+      { loadPatterns, analysisCases, resultCombinations, resultEnvelopes },
+      {
+        patternId,
+        caseId,
+        combinationId: page === "combinations" ? combinationId : "",
+        envelopeId: page === "envelopes" ? envelopeId : "",
+      },
     );
     if (problem) setError(problem);
     else onClose();
@@ -221,7 +295,7 @@ export default function LoadDefinitions({
         onClose();
       }}
     >
-      <h2 id="load-editor-title">Padrões, casos e combinações</h2>
+      <h2 id="load-editor-title">Padrões, casos, combinações e envelopes</h2>
       <form onSubmit={apply}>
         <div className="guide-tabs" aria-label="Definições de carga">
           {(
@@ -229,6 +303,7 @@ export default function LoadDefinitions({
               ["patterns", "Padrões de carga"],
               ["cases", "Casos estáticos"],
               ["combinations", "Combinações lineares"],
+              ["envelopes", "Envelopes"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -302,6 +377,80 @@ export default function LoadDefinitions({
               cargas distribuídas. Atribua forças e momentos pelo painel de
               propriedades.
             </p>
+          </div>
+        ) : page === "envelopes" ? (
+          <div className="load-definition-fields">
+            <div className="definition-picker">
+              {envelope && (
+                <label>
+                  Envelope para editar
+                  <select
+                    value={envelopeId}
+                    onChange={(event) => {
+                      setEnvelopeId(event.target.value);
+                      setError("");
+                    }}
+                  >
+                    {envelopes.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name || "Envelope sem nome"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <button
+                type="button"
+                onClick={addEnvelope}
+                disabled={!combinations.length || envelopes.length >= 100}
+              >
+                <Plus size={14} /> Novo envelope
+              </button>
+              {envelope && (
+                <button type="button" onClick={removeEnvelope}>
+                  <Trash2 size={14} /> Excluir envelope
+                </button>
+              )}
+            </div>
+            {envelope ? (
+              <>
+                <label>
+                  Nome do envelope
+                  <input
+                    value={envelope.name}
+                    maxLength={120}
+                    onChange={(event) =>
+                      updateEnvelope({ name: event.target.value })
+                    }
+                  />
+                </label>
+                <fieldset className="case-factors envelope-sources">
+                  <legend>Combinações no envelope</legend>
+                  {combinations.map((item) => (
+                    <label key={item.id}>
+                      <input
+                        type="checkbox"
+                        checked={envelope.combinationIds.includes(item.id)}
+                        onChange={(event) =>
+                          updateEnvelope({
+                            combinationIds: event.target.checked
+                              ? [...envelope.combinationIds, item.id]
+                              : envelope.combinationIds.filter(
+                                  (id) => id !== item.id,
+                                ),
+                          })
+                        }
+                      />
+                      {item.name || "Combinação sem nome"}
+                    </label>
+                  ))}
+                </fieldset>
+              </>
+            ) : (
+              !combinations.length && (
+                <p>Cadastre uma combinação linear para definir o envelope.</p>
+              )
+            )}
           </div>
         ) : (
           <div className="load-definition-fields">

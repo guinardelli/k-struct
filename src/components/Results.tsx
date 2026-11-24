@@ -5,10 +5,15 @@ import type {
   AnalysisResult,
   Displacement,
   Reaction,
-  Station,
   StructuralResult,
 } from "../solver/oofem";
 import { exportFile } from "../solver/desktop";
+import {
+  encodeCsv,
+  forceColumns,
+  forceLabels,
+  formatResult,
+} from "./resultFormatting";
 
 type ResultView =
   | { kind: "case"; definition: AnalysisCase; result: AnalysisResult | null }
@@ -58,8 +63,6 @@ export default function Results({
       setExportError(String(e)),
     );
   };
-  const fmt = (v: number) =>
-    v.toLocaleString("pt-BR", { maximumFractionDigits: 5 });
   const spatial = project.mode === "spatial";
   const nodeNames = new Map(project.nodes.map((n) => [n.id, n.name]));
   const memberNames = new Map(project.members.map((m) => [m.id, m.name]));
@@ -114,25 +117,20 @@ export default function Results({
       ),
     ];
   } else if (tab === "forces") {
-    const values = (s: Station) =>
-      spatial ? [s.n, s.vy, s.vz, s.mx, s.my, s.mz] : [s.n, s.v, s.m];
-    headers = spatial
-      ? [
-          "Barra",
-          "x/L",
-          "N (kN)",
-          "Vy (kN)",
-          "Vz (kN)",
-          "Mx (kN·m)",
-          "My (kN·m)",
-          "Mz (kN·m)",
-        ]
-      : ["Barra", "x/L", "N (kN)", "V (kN)", "M (kN·m)"];
+    const components = forceColumns[project.mode];
+    headers = [
+      "Barra",
+      "x/L",
+      ...components.map((key) => {
+        const { symbol, unit } = forceLabels[key];
+        return `${symbol} (${unit})`;
+      }),
+    ];
     rows = Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
       stations.map((s) => [
         memberNames.get(id) ?? id,
         s.t,
-        ...values(s).map((v) => v / 1000),
+        ...components.map((key) => s[key] / 1000),
       ]),
     );
   }
@@ -202,21 +200,10 @@ export default function Results({
                       source.push(JSON.stringify(combination.factors));
                     download(
                       `kstruct-${combination ? "combinacao-" : ""}${definition.id}-${tab}.csv`,
-                      "\uFEFF" +
-                        [
-                          [...headers, ...sourceHeaders],
-                          ...rows.map((row) => [...row, ...source]),
-                        ]
-                          .map((r) =>
-                            r
-                              .map((v) =>
-                                typeof v === "number"
-                                  ? String(v)
-                                  : `"${v.replaceAll('"', '""')}"`,
-                              )
-                              .join(";"),
-                          )
-                          .join("\n"),
+                      encodeCsv([
+                        [...headers, ...sourceHeaders],
+                        ...rows.map((row) => [...row, ...source]),
+                      ]),
                       "text/csv",
                     );
                   }}
@@ -271,7 +258,9 @@ export default function Results({
               {rows.map((r, i) => (
                 <tr key={i}>
                   {r.map((v, j) => (
-                    <td key={j}>{typeof v === "number" ? fmt(v) : v}</td>
+                    <td key={j}>
+                      {typeof v === "number" ? formatResult(v) : v}
+                    </td>
                   ))}
                 </tr>
               ))}

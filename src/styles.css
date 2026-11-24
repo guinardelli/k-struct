@@ -764,6 +764,58 @@ button.primary {
   color: #bfa9dc;
   border-top: 1px solid #453552;
 }
+.work-area {
+  --envelope-max: #82dce6;
+  --envelope-min: #f2ae7a;
+}
+.envelope-plot {
+  cursor: pointer;
+}
+.envelope-fill {
+  fill: #82dce62b;
+}
+.envelope-plot polyline {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.envelope-max-line polyline {
+  stroke: var(--envelope-max);
+}
+.envelope-min-line polyline {
+  stroke: var(--envelope-min);
+  stroke-dasharray: 5 3;
+}
+.envelope-max-line circle {
+  fill: var(--envelope-max);
+}
+.envelope-min-line circle {
+  fill: var(--envelope-min);
+}
+.envelope-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.envelope-max-label,
+.envelope-results th.envelope-max-label {
+  color: var(--envelope-max);
+}
+.envelope-min-label,
+.envelope-results th.envelope-min-label {
+  color: var(--envelope-min);
+}
+.envelope-legend .envelope-max-label::before,
+.envelope-legend .envelope-min-label::before {
+  content: "";
+  display: inline-block;
+  width: 15px;
+  border-top: 2px solid currentColor;
+  margin: 0 5px 2px 0;
+}
+.envelope-legend .envelope-min-label::before {
+  border-top-style: dashed;
+}
 .results {
   height: 177px;
   min-height: 110px;
@@ -891,6 +943,38 @@ button.primary {
 }
 .results tbody tr:hover {
   background: #202b3a;
+}
+.envelope-results .results-heading {
+  gap: 8px;
+  padding-left: 10px;
+}
+.envelope-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #d1b9f0;
+  font-size: 11px;
+}
+.envelope-results .result-actions label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  color: #95a7bc;
+  font-size: 10px;
+}
+.envelope-results .result-actions select {
+  max-width: 110px;
+  padding: 3px 5px;
+  font-size: 10px;
+}
+.envelope-results th[scope="row"] {
+  position: static;
+  background: none;
+}
+.envelope-results .governing-force {
+  color: #e1d1ff;
+  font-weight: 600;
 }
 .inspector {
   width: 258px;
@@ -1220,6 +1304,21 @@ button.primary {
 }
 .case-factors p {
   margin-top: 0;
+}
+.envelope-sources {
+  max-height: 220px;
+  overflow: auto;
+}
+.envelope-sources label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.envelope-sources input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  accent-color: #ae8bd9;
 }
 .guide-tabs {
   display: flex;

@@ -24,7 +24,7 @@ Empacotamento do OOFEM 3.0 para Windows e Linux, manifesto com hashes, fontes e 
 
 O lançamento espacial da etapa 03 inclui eixos, pavimentos, planos de trabalho, ortogonalidade, seleção múltipla, replicação, interseções e análise Beam3d. O [benchmark espacial](VALIDATION.md#pórtico-espacial-de-dois-pavimentos) cobre a criação a partir de um projeto vazio.
 
-A etapa 04 já inclui edição de padrões, casos estáticos e combinações lineares de resultados. A [verificação de combinações](VALIDATION.md#combinações-lineares) compara a superposição com uma análise direta no OOFEM. O próximo incremento são os envelopes com identificação da combinação governante e dos esforços simultâneos. As fontes de massa e a análise modal seguem na etapa 06.
+A etapa 04 já inclui edição de padrões e casos estáticos, combinações lineares e envelopes de esforços em barras. A [verificação de envelopes](VALIDATION.md#envelopes-de-esforços) confere os extremos e os esforços simultâneos das combinações governantes com análises diretas no OOFEM. O próximo incremento são filtros e tabelas editáveis. As fontes de massa e a análise modal seguem na etapa 06.
 
 ## Decisões que devem continuar explícitas
 

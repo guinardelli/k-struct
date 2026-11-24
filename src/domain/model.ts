@@ -118,7 +118,7 @@ const spatialSchema = legacySchema.extend({
     })
     .strict(),
 });
-export const projectSchema = spatialSchema.extend({
+const combinationSchema = spatialSchema.extend({
   schemaVersion: z.literal(3),
   resultCombinations: z
     .array(
@@ -136,10 +136,21 @@ export const projectSchema = spatialSchema.extend({
     )
     .max(100),
 });
+export const projectSchema = combinationSchema.extend({
+  schemaVersion: z.literal(4),
+  resultEnvelopes: z
+    .array(
+      z
+        .object({ id, name: text, combinationIds: z.array(id).min(1).max(100) })
+        .strict(),
+    )
+    .max(100),
+});
 
 export type Project = z.infer<typeof projectSchema>;
 export type AnalysisCase = Project["analysisCases"][number];
 export type ResultCombination = Project["resultCombinations"][number];
+export type ResultEnvelope = Project["resultEnvelopes"][number];
 export type StructuralNode = Project["nodes"][number];
 export type Member = Project["members"][number];
 export type NodalLoad = Project["loadPatterns"][number]["nodal"][number];
@@ -191,7 +202,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 3,
+    schemaVersion: 4,
     id: uid(),
     name: "Projeto sem título",
     units: "N-m-kg-s",
@@ -223,6 +234,7 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
       },
     ],
     resultCombinations: [],
+    resultEnvelopes: [],
     mesh: { segmentsPerMember: 8 },
   };
 }
@@ -273,10 +285,11 @@ export function parseProject(source: string): Project {
     const v1 = legacy.data;
     value = {
       ...v1,
-      schemaVersion: 3,
+      schemaVersion: 4,
       mode: "planar",
       guides: defaultGuides(),
       resultCombinations: [],
+      resultEnvelopes: [],
       nodes: v1.nodes.map((n) => ({
         ...n,
         restraints: { ...free(), ...n.restraints },
@@ -291,17 +304,27 @@ export function parseProject(source: string): Project {
   } else if (
     value !== null &&
     typeof value === "object" &&
-    "schemaVersion" in value &&
-    value.schemaVersion === 2
+    "schemaVersion" in value
   ) {
-    const v2 = spatialSchema.safeParse(value);
-    if (v2.success)
-      value = { ...v2.data, schemaVersion: 3, resultCombinations: [] };
+    if (value.schemaVersion === 2) {
+      const v2 = spatialSchema.safeParse(value);
+      if (v2.success)
+        value = {
+          ...v2.data,
+          schemaVersion: 4,
+          resultCombinations: [],
+          resultEnvelopes: [],
+        };
+    } else if (value.schemaVersion === 3) {
+      const v3 = combinationSchema.safeParse(value);
+      if (v3.success)
+        value = { ...v3.data, schemaVersion: 4, resultEnvelopes: [] };
+    }
   }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct versão 1, 2 ou 3, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct versão 1, 2, 3 ou 4, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -318,6 +341,7 @@ export function referenceErrors(p: Project): string[] {
     p.loadPatterns,
     p.analysisCases,
     p.resultCombinations,
+    p.resultEnvelopes,
     ...Object.values(p.guides),
   ]) {
     if (new Set(list.map((v) => v.id)).size !== list.length)
@@ -370,6 +394,19 @@ export function referenceErrors(p: Project): string[] {
     if (!combination.factors.some((term) => term.factor !== 0))
       errors.push(
         `Informe pelo menos um fator diferente de zero na combinação ${combination.name}.`,
+      );
+  }
+  const combinations = new Set(p.resultCombinations.map(({ id }) => id));
+  for (const envelope of p.resultEnvelopes) {
+    if (envelope.combinationIds.some((id) => !combinations.has(id)))
+      errors.push(
+        `O envelope ${envelope.name} referencia uma combinação inexistente.`,
+      );
+    if (
+      new Set(envelope.combinationIds).size !== envelope.combinationIds.length
+    )
+      errors.push(
+        `Inclua cada combinação uma única vez no envelope ${envelope.name}.`,
       );
   }
   return errors;

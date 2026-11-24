@@ -1,7 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { parseProject } from "../../src/domain/model";
+import {
+  beamExample,
+  parseProject,
+  serializeProject,
+} from "../../src/domain/model";
 
 // Only the IPC boundary is substituted. This is a captured result from the real
 // OOFEM benchmark, not an alternative solver or a fallback in the application.
@@ -164,7 +168,7 @@ test("combinação linear lista casos pendentes, consulta resultados e preserva 
   await page.getByRole("button", { name: /Viga de referência/ }).click();
   await button("Cargas e casos").click();
   const editor = page.getByRole("dialog", {
-    name: "Padrões, casos e combinações",
+    name: "Padrões, casos, combinações e envelopes",
   });
   const editButton = (name: string) =>
     editor.getByRole("button", { name, exact: true });
@@ -185,7 +189,9 @@ test("combinação linear lista casos pendentes, consulta resultados e preserva 
     .inputValue();
   await editButton("Aplicar definições").click();
 
-  const picker = page.getByLabel("Caso ou combinação", { exact: true });
+  const picker = page.getByLabel("Caso, combinação ou envelope", {
+    exact: true,
+  });
   const combo = `combination:${combinationId}`;
   const status = page.getByRole("status");
   await expect(picker).toHaveValue(combo);
@@ -257,6 +263,153 @@ test("combinação linear lista casos pendentes, consulta resultados e preserva 
   await button("Mensagens").click();
   await expect(status).toContainText("1,8 × Permanente − 0,3 × Variável");
   await expect(status).toContainText("Permanente, Variável");
+});
+
+test("envelope consulta os dois extremos por estação e exporta as combinações governantes", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  const project = beamExample();
+  project.resultCombinations = [
+    {
+      id: "POS",
+      name: "Flexão positiva",
+      type: "linear",
+      factors: [{ caseId: "EL", factor: 1 }],
+    },
+    {
+      id: "NEG",
+      name: "Flexão negativa",
+      type: "linear",
+      factors: [{ caseId: "EL", factor: -2 }],
+    },
+    {
+      id: "OUT",
+      name: "Outra combinação",
+      type: "linear",
+      factors: [{ caseId: "EL", factor: 10 }],
+    },
+  ];
+  const input = page.locator('input[type="file"]');
+  await input.setInputFiles({
+    name: "viga.kstruct.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(serializeProject(project)),
+  });
+  await expect(page.locator(".model-count")).toHaveText("2 nós · 1 barras");
+  await button("Cargas e casos").click();
+  const editor = page.getByRole("dialog", {
+    name: "Padrões, casos, combinações e envelopes",
+  });
+  const editButton = (name: string) =>
+    editor.getByRole("button", { name, exact: true });
+  await editButton("Envelopes").click();
+  await editButton("Novo envelope").click();
+  await editor.getByLabel("Nome do envelope").fill("Envelope de projeto");
+  await editButton("Aplicar definições").click();
+  await expect(editor.getByRole("alert")).toContainText(
+    "Selecione pelo menos uma combinação",
+  );
+  await editor.getByRole("checkbox", { name: "Flexão positiva" }).check();
+  await editor.getByRole("checkbox", { name: "Flexão negativa" }).check();
+  const envelopeId = await editor
+    .getByLabel("Envelope para editar")
+    .inputValue();
+  await editButton("Aplicar definições").click();
+
+  const picker = page.getByLabel("Caso, combinação ou envelope", {
+    exact: true,
+  });
+  const envelopeOption = `envelope:${envelopeId}`;
+  const region = page.getByRole("region", { name: "Resultados do envelope" });
+  const plot = page.locator(".envelope-plot");
+  const table = region.getByRole("table");
+  await expect(picker).toHaveValue(envelopeOption);
+  await expect(region.getByRole("status")).toContainText(
+    "Analise os casos pendentes nesta revisão.",
+  );
+  await expect(button("Analisar")).toBeDisabled();
+
+  await button("Cargas e casos").click();
+  await editButton("Combinações lineares").click();
+  await editor.getByLabel("Combinação para editar").selectOption("POS");
+  await editButton("Excluir combinação").click();
+  await expect(editor.getByRole("alert")).toContainText(
+    "A combinação está em uso nos envelopes Envelope de projeto",
+  );
+  await editButton("Cancelar").click();
+  await picker.selectOption("EL");
+  await button("Analisar").click();
+  await expect(page.getByRole("status")).toContainText("Análise concluída");
+  await picker.selectOption(envelopeOption);
+  await expect(plot).toHaveCount(1);
+  await expect(page.getByLabel("Visualização dos resultados")).toHaveValue("m");
+  const middle = await plot
+    .locator(".envelope-max-line polyline")
+    .evaluate((element) => {
+      const line = element as SVGPolylineElement;
+      const { x, y } = line.points
+        .getItem(4)
+        .matrixTransform(line.getScreenCTM()!);
+      return { x, y };
+    });
+  await page.mouse.click(middle.x, middle.y);
+  await expect(region.getByLabel("Estação x/L")).toHaveValue("4");
+  const max = table.getByRole("row", { name: /Máximo/ });
+  const min = table.getByRole("row", { name: /Mínimo/ });
+  await expect(max).toContainText("Flexão positiva");
+  await expect(
+    max.getByRole("cell", { name: "45", exact: true }),
+  ).toBeVisible();
+  await expect(min).toContainText("Flexão negativa");
+  await expect(
+    min.getByRole("cell", { name: "-90", exact: true }),
+  ).toBeVisible();
+
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  const csvDownload = page.waitForEvent("download");
+  await region.getByRole("button", { name: "CSV", exact: true }).click();
+  const csv = await readFile((await (await csvDownload).path())!, "utf8");
+  const csvRows = csv.split("\n");
+  const maxRow = csvRows.find((row) =>
+    row.includes(';0.5;"M";"Máximo";"Flexão positiva";"POS";'),
+  );
+  const minRow = csvRows.find((row) =>
+    row.includes(';0.5;"M";"Mínimo";"Flexão negativa";"NEG";'),
+  );
+  expect(maxRow).toContain(";45;");
+  expect(minRow).toContain(";-90;");
+  expect(csv).not.toContain("Outra combinação");
+
+  const projectDownload = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const path = (await (await projectDownload).path())!;
+  const saved = parseProject(await readFile(path, "utf8"));
+  expect(saved.resultEnvelopes).toEqual([
+    {
+      id: envelopeId,
+      name: "Envelope de projeto",
+      combinationIds: ["POS", "NEG"],
+    },
+  ]);
+  await page.getByLabel("qZ global", { exact: true }).fill("-20");
+  await page.getByLabel("qZ global", { exact: true }).press("Enter");
+  await expect(plot).toHaveCount(0);
+  await expect(table).toHaveCount(0);
+  await expect(region.getByRole("status")).toContainText(
+    "Analise os casos pendentes",
+  );
+
+  await input.setInputFiles(path);
+  await expect(picker).toHaveValue("EL");
+  await picker.selectOption(envelopeOption);
+  await expect(region.getByRole("status")).toContainText(
+    "Analise os casos pendentes",
+  );
 });
 
 test("resposta antiga é descartada quando o modelo muda durante a execução", async ({

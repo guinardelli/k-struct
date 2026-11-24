@@ -62,6 +62,12 @@ A viga plana e o pórtico espacial são analisados no OOFEM 3.0 com ações dist
 
 As tolerâncias refletem os algarismos impressos pelo OOFEM. Para forças e momentos, o erro absoluto admitido é de 0,1 N ou N·m mais 0,01% do valor de referência. O teste de interface verifica casos pendentes, diagrama, tabela, composição no CSV, reabertura e descarte dos resultados após uma edição.
 
+## Envelopes de esforços
+
+O benchmark usa um pórtico espacial em L com viga de 4 m, pilar engastado de 3 m e duas combinações de forças e momentos na extremidade livre. No meio da viga, a primeira combinação governa o maior momento `My = 11,99 kN·m` com `N = −4,8 kN`. A segunda governa a maior compressão `N = −15,1 kN` com `My = −4,98 kN·m`. O teste confere as seis componentes simultâneas em cada extremo por equilíbrio do trecho e análise direta de cada combinação no OOFEM 3.0.
+
+O teste plano verifica a conservação do sinal e o desempate pela ordem de seleção. O Playwright verifica escolha das combinações, estação selecionada no diagrama, tabela, CSV, reabertura e invalidação. Os limites são avaliados nas estações da malha e ligados por segmentos no diagrama.
+
 ## Ainda não validado nesta etapa
 
-Flambagem/P–Δ, massas/modal, envelopes, cascas, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+Flambagem/P–Δ, massas/modal, cascas, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.

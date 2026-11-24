@@ -44,6 +44,7 @@ import {
   serializeProject,
   uid,
   type Project,
+  type ResultEnvelope,
   type SelectedObject,
   type Selection,
 } from "./domain/model";
@@ -70,6 +71,7 @@ import {
 import SpatialView from "./components/SpatialView";
 import Inspector from "./components/Inspector";
 import Results from "./components/Results";
+import EnvelopeResults from "./components/EnvelopeResults";
 import SolverSettings from "./components/SolverSettings";
 import RunHistory from "./components/RunHistory";
 import LoadDefinitions, {
@@ -77,6 +79,11 @@ import LoadDefinitions, {
 } from "./components/LoadDefinitions";
 import { version } from "../package.json";
 import { combineLinearResults } from "./solver/combinations";
+import {
+  evaluateMemberEnvelope,
+  type EnvelopeSection,
+  type MemberEnvelopeResult,
+} from "./solver/envelopes";
 import {
   exportOofem,
   parseOofemOutput,
@@ -95,6 +102,7 @@ import {
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v4") ??
       localStorage.getItem("kstruct.draft.v3") ??
       localStorage.getItem("kstruct.draft.v2") ??
       localStorage.getItem("kstruct.draft.v1");
@@ -158,13 +166,31 @@ export default function App() {
   });
   const [preferredCaseId, setCaseId] = useState(p.analysisCases[0].id),
     [preferredPatternId, setPatternId] = useState(p.loadPatterns[0].id);
-  const [preferredCombinationId, setCombinationId] = useState("");
+  const [derivedChoice, setDerivedChoice] = useState<{
+    kind: "combination" | "envelope";
+    id: string;
+  } | null>(null);
+  const [preferredSection, setPreferredSection] =
+    useState<EnvelopeSection | null>(null);
+  const [calculatedEnvelope, setCalculatedEnvelope] = useState<{
+    project: Project;
+    envelope: ResultEnvelope;
+    cases: ReadonlyMap<string, AnalysisResult>;
+    result: MemberEnvelopeResult | null;
+    problem: string;
+  } | null>(null);
   const analysisCase =
     p.analysisCases.find((c) => c.id === preferredCaseId) ?? p.analysisCases[0];
   const caseId = analysisCase.id;
-  const combination = p.resultCombinations.find(
-    (item) => item.id === preferredCombinationId,
-  );
+  const combination =
+    derivedChoice?.kind === "combination"
+      ? p.resultCombinations.find(({ id }) => id === derivedChoice.id)
+      : undefined;
+  const envelope =
+    derivedChoice?.kind === "envelope"
+      ? p.resultEnvelopes.find(({ id }) => id === derivedChoice.id)
+      : undefined;
+  const derived = combination ?? envelope;
   const patternId =
     p.loadPatterns.find((pattern) => pattern.id === preferredPatternId)?.id ??
     p.loadPatterns[0].id;
@@ -183,8 +209,69 @@ export default function App() {
       };
     }
   }, [p, combination, caseResults]);
-  const result = combined ? combined.result : caseResult;
-  const visibleDisplay = result ? display : "model";
+  useEffect(() => {
+    if (!envelope) {
+      setCalculatedEnvelope(null);
+      return;
+    }
+    const controller = new AbortController();
+    const context = { project: p, envelope, cases: caseResults };
+    void evaluateMemberEnvelope(
+      p,
+      envelope,
+      caseResults,
+      controller.signal,
+    ).then(
+      (result) => {
+        if (!controller.signal.aborted)
+          setCalculatedEnvelope({ ...context, result, problem: "" });
+      },
+      (error: unknown) => {
+        if (!controller.signal.aborted)
+          setCalculatedEnvelope({
+            ...context,
+            result: null,
+            problem: error instanceof Error ? error.message : String(error),
+          });
+      },
+    );
+    return () => controller.abort();
+  }, [p, envelope, caseResults]);
+  const envelopeState =
+    calculatedEnvelope?.project === p &&
+    calculatedEnvelope.envelope === envelope &&
+    calculatedEnvelope.cases === caseResults
+      ? calculatedEnvelope
+      : null;
+  const envelopeResult = envelopeState?.result ?? null;
+  const sectionMemberId =
+    selection.find(
+      (item) =>
+        item.kind === "member" && p.members.some(({ id }) => item.id === id),
+    )?.id ?? p.members[0]?.id;
+  const section =
+    envelopeResult && sectionMemberId
+      ? {
+          memberId: sectionMemberId,
+          index:
+            preferredSection?.memberId === sectionMemberId
+              ? preferredSection.index
+              : 0,
+        }
+      : null;
+  const envelopeComponent =
+    display === "model" || display === "deformed"
+      ? spatial
+        ? "my"
+        : "m"
+      : display;
+  const showEnvelope = Boolean(envelopeResult) && tool === "select";
+  const result = envelope ? null : combined ? combined.result : caseResult;
+  const visibleDisplay = showEnvelope
+    ? envelopeComponent
+    : result
+      ? display
+      : "model";
   const defaultDiagram = spatial ? "deformed" : "m";
   const [loadEditor, setLoadEditor] = useState<LoadDefinitionsPage | null>(
     null,
@@ -200,7 +287,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v3", serialized);
+      localStorage.setItem("kstruct.draft.v4", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -220,6 +307,7 @@ export default function App() {
     modelRevision.current++;
     setCaseResults(new Map());
     setDisplay("model");
+    setPreferredSection(null);
   }, []);
   const edit = useCallback(
     (fn: (p: Project) => void) => {
@@ -247,17 +335,26 @@ export default function App() {
     [invalidateResults],
   );
   const selectResult = (value: string) => {
+    const selectedEnvelope = p.resultEnvelopes.find(
+      (item) => `envelope:${item.id}` === value,
+    );
+    if (selectedEnvelope) {
+      setDerivedChoice({ kind: "envelope", id: selectedEnvelope.id });
+      setTool("select");
+      setPending(null);
+      return;
+    }
     const selectedCombination = p.resultCombinations.find(
       (item) => `combination:${item.id}` === value,
     );
     if (selectedCombination) {
-      setCombinationId(selectedCombination.id);
+      setDerivedChoice({ kind: "combination", id: selectedCombination.id });
       setDisplay((value) => (value === "model" ? defaultDiagram : value));
       return;
     }
     const selected = p.analysisCases.find((item) => item.id === value);
     if (!selected) return;
-    setCombinationId("");
+    setDerivedChoice(null);
     setCaseId(selected.id);
     if (caseResults.has(selected.id)) {
       setDisplay((value) => (value === "model" ? defaultDiagram : value));
@@ -285,6 +382,12 @@ export default function App() {
     setPending(null);
     setDisplay("model");
   };
+  const inspectSection = (target: EnvelopeSection) => {
+    selectObject({ kind: "member", id: target.memberId });
+    setPreferredSection(target);
+    setTool("select");
+    setPending(null);
+  };
   const replace = (project: Project) => {
     invalidateResults();
     current.current = project;
@@ -294,7 +397,7 @@ export default function App() {
     setPlane("XY");
     setGuide("");
     setCaseId(project.analysisCases[0].id);
-    setCombinationId("");
+    setDerivedChoice(null);
     setPatternId(project.loadPatterns[0].id);
     setSaved(serializeProject(project));
     setMessage(`Projeto aberto: ${project.name}.`);
@@ -706,7 +809,13 @@ export default function App() {
               <button
                 className="tool-button"
                 onClick={() =>
-                  setLoadEditor(combination ? "combinations" : "cases")
+                  setLoadEditor(
+                    envelope
+                      ? "envelopes"
+                      : combination
+                        ? "combinations"
+                        : "cases",
+                  )
                 }
               >
                 <ListChecks size={21} />
@@ -717,7 +826,7 @@ export default function App() {
               <button
                 className="tool-button"
                 onClick={exportDeck}
-                disabled={Boolean(combination)}
+                disabled={Boolean(derived)}
               >
                 <Download size={21} />
                 <span>Entrada OOFEM</span>
@@ -788,11 +897,17 @@ export default function App() {
         )}
         <div className="run-group">
           <label>
-            Caso ou combinação
+            Caso, combinação ou envelope
             <select
-              aria-label="Caso ou combinação"
+              aria-label="Caso, combinação ou envelope"
               disabled={running}
-              value={combination ? `combination:${combination.id}` : caseId}
+              value={
+                envelope
+                  ? `envelope:${envelope.id}`
+                  : combination
+                    ? `combination:${combination.id}`
+                    : caseId
+              }
               onChange={(e) => selectResult(e.target.value)}
             >
               <optgroup label="Casos estáticos">
@@ -811,11 +926,20 @@ export default function App() {
                   ))}
                 </optgroup>
               )}
+              {p.resultEnvelopes.length > 0 && (
+                <optgroup label="Envelopes">
+                  {p.resultEnvelopes.map((item) => (
+                    <option key={item.id} value={`envelope:${item.id}`}>
+                      {item.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </label>
           <button
             className="run-button"
-            disabled={running || Boolean(combination)}
+            disabled={running || Boolean(derived)}
             onClick={() => void run()}
           >
             <Play size={15} fill="currentColor" />
@@ -953,10 +1077,12 @@ export default function App() {
               value={visibleDisplay}
               onChange={(e) => setDisplay(e.target.value as Display)}
             >
-              <option value="model">Geometria e cargas</option>
-              {result && (
+              {!showEnvelope && (
+                <option value="model">Geometria e cargas</option>
+              )}
+              {result && <option value="deformed">Deformada ampliada</option>}
+              {(result || showEnvelope) && (
                 <>
-                  <option value="deformed">Deformada ampliada</option>
                   {spatial ? (
                     <>
                       <option value="my">Momento fletor My</option>
@@ -1003,6 +1129,15 @@ export default function App() {
               selection={selection}
               tool={tool}
               result={result}
+              envelope={
+                showEnvelope && envelopeResult && section
+                  ? {
+                      result: envelopeResult,
+                      section,
+                      onSection: inspectSection,
+                    }
+                  : null
+              }
               display={visibleDisplay}
               patternId={patternId}
               pending={pending}
@@ -1018,27 +1153,61 @@ export default function App() {
               />
             )}
           </div>
-          {visibleDisplay !== "model" && (
-            <div className="diagram-caption">
-              {visibleDisplay === "deformed"
-                ? "Deformada ampliada automaticamente. Valores reais na tabela de deslocamentos."
-                : spatial
-                  ? "Esforços nos eixos locais, na face positiva de x. N positivo em tração. O diagrama é desenhado no plano ativo."
-                  : "Esforços amostrados nos nós da malha. N positivo em tração. M positivo sagente para barras horizontais orientadas +X."}
+          {showEnvelope ? (
+            <div className="diagram-caption envelope-legend">
+              <span className="envelope-max-label">Máximo</span>
+              <span className="envelope-min-label">Mínimo</span>
+              <span>
+                N positivo em tração · Clique no diagrama para consultar uma
+                estação.
+              </span>
             </div>
+          ) : (
+            visibleDisplay !== "model" && (
+              <div className="diagram-caption">
+                {visibleDisplay === "deformed"
+                  ? "Deformada ampliada automaticamente. Valores reais na tabela de deslocamentos."
+                  : spatial
+                    ? "Esforços nos eixos locais, na face positiva de x. N positivo em tração. O diagrama é desenhado no plano ativo."
+                    : "Esforços amostrados nos nós da malha. N positivo em tração. M positivo sagente para barras horizontais orientadas +X."}
+              </div>
+            )
           )}
-          <Results
-            project={p}
-            view={
-              combination && combined
-                ? { kind: "combination", definition: combination, ...combined }
-                : { kind: "case", definition: analysisCase, result: caseResult }
-            }
-            message={message}
-            running={running}
-            cancelling={activeRun?.cancelling ?? false}
-            openRunHistory={lastLog ? () => setShowRunHistory(true) : undefined}
-          />
+          {envelope ? (
+            <EnvelopeResults
+              key={envelope.id}
+              project={p}
+              envelope={envelope}
+              result={envelopeResult}
+              component={envelopeComponent}
+              section={section}
+              problem={envelopeState?.problem ?? "Calculando envelope…"}
+              onSection={inspectSection}
+            />
+          ) : (
+            <Results
+              project={p}
+              view={
+                combination && combined
+                  ? {
+                      kind: "combination",
+                      definition: combination,
+                      ...combined,
+                    }
+                  : {
+                      kind: "case",
+                      definition: analysisCase,
+                      result: caseResult,
+                    }
+              }
+              message={message}
+              running={running}
+              cancelling={activeRun?.cancelling ?? false}
+              openRunHistory={
+                lastLog ? () => setShowRunHistory(true) : undefined
+              }
+            />
+          )}
         </main>
         {right && (
           <Inspector
@@ -1052,13 +1221,15 @@ export default function App() {
       <footer className="status-bar">
         <span>
           <ShieldCheck size={13} />
-          {result
-            ? combination
-              ? "Combinação disponível"
-              : "Análise concluída"
-            : running
-              ? "Análise em andamento"
-              : "Modelo em edição"}
+          {envelopeResult
+            ? "Envelope disponível"
+            : result
+              ? combination
+                ? "Combinação disponível"
+                : "Análise concluída"
+              : running
+                ? "Análise em andamento"
+                : "Modelo em edição"}
         </span>
         <span>
           {pending
@@ -1123,22 +1294,29 @@ export default function App() {
           initialCombinationId={
             combination?.id ?? p.resultCombinations[0]?.id ?? ""
           }
+          initialEnvelopeId={envelope?.id ?? p.resultEnvelopes[0]?.id ?? ""}
           onClose={() => setLoadEditor(null)}
-          onApply={(
-            definitions,
-            nextPatternId,
-            nextCaseId,
-            nextCombinationId,
-          ) => {
+          onApply={(definitions, next) => {
             const problem = edit((project) => {
               project.loadPatterns = definitions.loadPatterns;
               project.analysisCases = definitions.analysisCases;
               project.resultCombinations = definitions.resultCombinations;
+              project.resultEnvelopes = definitions.resultEnvelopes;
             });
             if (problem) return problem;
-            setPatternId(nextPatternId);
-            setCaseId(nextCaseId);
-            setCombinationId(nextCombinationId);
+            setPatternId(next.patternId);
+            setCaseId(next.caseId);
+            setDerivedChoice(
+              next.envelopeId
+                ? { kind: "envelope", id: next.envelopeId }
+                : next.combinationId
+                  ? { kind: "combination", id: next.combinationId }
+                  : null,
+            );
+            if (next.envelopeId) {
+              setTool("select");
+              setPending(null);
+            }
             setDisplay("model");
             setMessage("Definições de carga aplicadas.");
             return null;

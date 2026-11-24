@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import {
   coordinates,
@@ -11,20 +11,15 @@ import {
   type WorkPlane,
 } from "../domain/geometry";
 import type { Project, SelectedObject, Selection } from "../domain/model";
+import type { MemberForceComponent } from "../solver/combinations";
+import type {
+  EnvelopeSection,
+  MemberEnvelopeResult,
+} from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
 
 export type Tool = "select" | "node" | "member";
-export type Display =
-  | "model"
-  | "deformed"
-  | "m"
-  | "v"
-  | "n"
-  | "vy"
-  | "vz"
-  | "mx"
-  | "my"
-  | "mz";
+export type Display = "model" | "deformed" | MemberForceComponent;
 type UV = { u: number; v: number };
 interface Props {
   project: Project;
@@ -33,6 +28,11 @@ interface Props {
   selection: SelectedObject[];
   tool: Tool;
   result: StructuralResult | null;
+  envelope: {
+    result: MemberEnvelopeResult;
+    section: EnvelopeSection;
+    onSection: (section: EnvelopeSection) => void;
+  } | null;
   display: Display;
   patternId: string;
   pending: Point3 | null;
@@ -53,6 +53,7 @@ export default function WorkPlaneView({
   selection,
   tool,
   result,
+  envelope,
   display,
   patternId,
   pending,
@@ -176,10 +177,30 @@ export default function WorkPlaneView({
     ...allStations.map((s) => Math.hypot(s[dofU], s[dofV])),
   );
   const deformationScale = 60 / (maxU * camera.scale);
-  const maxForce =
-    display === "model" || display === "deformed"
-      ? 1
-      : Math.max(1, ...allStations.map((s) => Math.abs(s[display])));
+  const component =
+    display === "model" || display === "deformed" ? null : display;
+  const envelopeResult = envelope?.result;
+  const maxForce = useMemo(() => {
+    let magnitude = 1;
+    if (!component) return magnitude;
+    if (envelopeResult) {
+      for (const stations of Object.values(envelopeResult)) {
+        for (const station of stations) {
+          const { min, max } = station.ranges[component];
+          magnitude = Math.max(
+            magnitude,
+            Math.abs(min.forces[component]),
+            Math.abs(max.forces[component]),
+          );
+        }
+      }
+    } else {
+      for (const stations of Object.values(result?.members ?? {}))
+        for (const station of stations)
+          magnitude = Math.max(magnitude, Math.abs(station[component]));
+    }
+    return magnitude;
+  }, [component, envelopeResult, result]);
   const gridStep = camera.scale < 25 ? 2 : camera.scale > 120 ? 0.5 : 1;
   const grid = (center: number, pixels: number) => {
     const start =
@@ -390,21 +411,43 @@ export default function WorkPlaneView({
           const norm = Math.hypot(qu, qv);
           const length = Math.hypot(du, dv);
           const stations = result?.members[m.id];
+          const envelopeStations = envelopeResult?.[m.id];
+          const forcePoint = (t: number, value: number) => {
+            const offset = ((value / maxForce) * 70) / camera.scale;
+            return [
+              sx(u + du * t + (dv / length) * offset),
+              sy(v + dv * t - (du / length) * offset),
+            ] as const;
+          };
+          const band =
+            envelopeStations && component && length >= tolerance
+              ? {
+                  max: envelopeStations.map((s) =>
+                    forcePoint(s.t, s.ranges[component].max.forces[component]),
+                  ),
+                  min: envelopeStations.map((s) =>
+                    forcePoint(s.t, s.ranges[component].min.forces[component]),
+                  ),
+                }
+              : null;
+          const sectionAt = (event: { clientX: number; clientY: number }) => {
+            if (!band || !envelope || !envelopeStations) return;
+            const bounds = ref.current!.getBoundingClientRect();
+            const x = (event.clientX - bounds.left - sx(u)) / camera.scale;
+            const y = (sy(v) - (event.clientY - bounds.top)) / camera.scale;
+            const t = Math.min(1, Math.max(0, (x * du + y * dv) / length ** 2));
+            envelope.onSection({
+              memberId: m.id,
+              index: Math.round(t * (envelopeStations.length - 1)),
+            });
+          };
           let diagram: string | undefined;
           if (stations && display !== "model" && length >= tolerance) {
             diagram = stations
               .map((s) => {
-                let pu = u + du * s.t,
-                  pv = v + dv * s.t;
-                if (display === "deformed") {
-                  pu += s[dofU] * deformationScale;
-                  pv += s[dofV] * deformationScale;
-                } else {
-                  const offset = ((s[display] / maxForce) * 70) / camera.scale;
-                  pu += (dv / length) * offset;
-                  pv -= (du / length) * offset;
-                }
-                return `${sx(pu)},${sy(pv)}`;
+                if (display === "deformed")
+                  return `${sx(u + du * s.t + s[dofU] * deformationScale)},${sy(v + dv * s.t + s[dofV] * deformationScale)}`;
+                return forcePoint(s.t, s[display]).join(",");
               })
               .join(" ");
           }
@@ -428,7 +471,12 @@ export default function WorkPlaneView({
                 onClick={(e) => {
                   if (tool !== "select") return;
                   e.stopPropagation();
-                  onSelect({ kind: "member", id: m.id }, additiveSelection(e));
+                  if (band && !additiveSelection(e)) sectionAt(e);
+                  else
+                    onSelect(
+                      { kind: "member", id: m.id },
+                      additiveSelection(e),
+                    );
                 }}
               />
               {labels && (
@@ -486,6 +534,45 @@ export default function WorkPlaneView({
                     pointerEvents="none"
                   />
                 ))}
+              {band && (
+                <g
+                  className="envelope-plot"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    sectionAt(event);
+                  }}
+                >
+                  <polygon
+                    points={[...band.max, ...[...band.min].reverse()]
+                      .map((point) => point.join(","))
+                      .join(" ")}
+                    className="envelope-fill"
+                  />
+                  {(["max", "min"] as const).map((bound) => {
+                    const points = band[bound];
+                    const selectedPoint =
+                      envelope?.section.memberId === m.id
+                        ? points[envelope.section.index]
+                        : undefined;
+                    return (
+                      <g key={bound} className={`envelope-${bound}-line`}>
+                        <polyline
+                          points={points
+                            .map((point) => point.join(","))
+                            .join(" ")}
+                        />
+                        {selectedPoint && (
+                          <circle
+                            cx={selectedPoint[0]}
+                            cy={selectedPoint[1]}
+                            r="3.8"
+                          />
+                        )}
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
             </g>
           );
         })}

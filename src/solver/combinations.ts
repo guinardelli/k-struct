@@ -1,10 +1,9 @@
 import type { Project, ResultCombination } from "../domain/model";
-import type { AnalysisResult, Reaction, StructuralResult } from "./oofem";
+import type { AnalysisResult, Station, StructuralResult } from "./oofem";
 
 const displacementComponents = ["ux", "uy", "uz", "rx", "ry", "rz"] as const;
 const reactionComponents = ["fx", "fy", "fz", "mx", "my", "mz"] as const;
-const stationComponents = [
-  ...displacementComponents,
+export const memberForceComponents = [
   "n",
   "v",
   "m",
@@ -14,17 +13,22 @@ const stationComponents = [
   "my",
   "mz",
 ] as const;
+export type MemberForceComponent = (typeof memberForceComponents)[number];
+export type MemberForces = Pick<Station, MemberForceComponent>;
+const stationComponents = [
+  ...displacementComponents,
+  ...memberForceComponents,
+] as const;
 
 type WeightedCase = {
   factor: number;
   result: AnalysisResult;
-  reactions: ReadonlyMap<string, Reaction>;
 };
 
-function sumComponents<K extends string>(
+function sumComponents<K extends string, C extends WeightedCase>(
   components: readonly K[],
-  cases: WeightedCase[],
-  values: (term: WeightedCase) => Record<K, number> | undefined,
+  cases: readonly C[],
+  values: (term: C) => Record<K, number> | undefined,
 ): Record<K, number> {
   const total = Object.fromEntries(components.map((key) => [key, 0])) as Record<
     K,
@@ -47,35 +51,86 @@ function sumComponents<K extends string>(
   return total;
 }
 
+export function requireAvailableCases(
+  project: Project,
+  factors: readonly ResultCombination["factors"][number][],
+  caseResults: ReadonlyMap<string, AnalysisResult>,
+): void {
+  const pending = new Set(
+    factors
+      .filter(
+        ({ caseId, factor }) =>
+          factor !== 0 && caseResults.get(caseId)?.caseId !== caseId,
+      )
+      .map(({ caseId }) => caseId),
+  );
+  if (pending.size) {
+    const caseNames = new Map(
+      project.analysisCases.map(({ id, name }) => [id, name]),
+    );
+    const names = [...pending].map((caseId) => caseNames.get(caseId) ?? caseId);
+    throw new Error(
+      `Analise os casos pendentes nesta revisão.\n${names.join(", ")}`,
+    );
+  }
+}
+
+function weightedCases(
+  project: Project,
+  combination: ResultCombination,
+  caseResults: ReadonlyMap<string, AnalysisResult>,
+) {
+  const terms = combination.factors.filter((term) => term.factor !== 0);
+  if (!terms.length)
+    throw new Error("Informe pelo menos um fator diferente de zero.");
+  requireAvailableCases(project, terms, caseResults);
+  return terms.map(({ caseId, factor }) => ({
+    factor,
+    result: caseResults.get(caseId)!,
+  }));
+}
+
+function sumStations<K extends keyof Station>(
+  components: readonly K[],
+  cases: WeightedCase[],
+  segments: number,
+  memberId: string,
+) {
+  return Array.from({ length: segments + 1 }, (_, index) => {
+    const t = index / segments;
+    const values = sumComponents(components, cases, ({ result }) => {
+      const stations = result.members[memberId];
+      if (stations?.length === segments + 1 && stations[index]?.t === t)
+        return stations[index];
+    });
+    return { t, ...values };
+  });
+}
+
+export function prepareMemberForces(
+  project: Project,
+  combination: ResultCombination,
+  caseResults: ReadonlyMap<string, AnalysisResult>,
+) {
+  const cases = weightedCases(project, combination, caseResults);
+  const segments = project.mesh.segmentsPerMember;
+  return (memberId: string) =>
+    sumStations(memberForceComponents, cases, segments, memberId);
+}
+
 // The caller supplies parsed linear-static results from the current model revision.
 export function combineLinearResults(
   project: Project,
   combination: ResultCombination,
   caseResults: ReadonlyMap<string, AnalysisResult>,
 ): StructuralResult {
-  const terms = combination.factors.filter((term) => term.factor !== 0);
-  if (!terms.length)
-    throw new Error("Informe pelo menos um fator diferente de zero.");
-  const pending = terms.filter(
-    ({ caseId }) => caseResults.get(caseId)?.caseId !== caseId,
-  );
-  if (pending.length) {
-    const caseNames = new Map(
-      project.analysisCases.map(({ id, name }) => [id, name]),
-    );
-    const names = pending.map(({ caseId }) => caseNames.get(caseId) ?? caseId);
-    throw new Error(
-      `Analise os casos pendentes nesta revisão.\n${names.join(", ")}`,
-    );
-  }
-  const cases = terms.map(({ caseId, factor }) => {
-    const result = caseResults.get(caseId)!;
-    return {
-      factor,
-      result,
-      reactions: new Map(result.reactions.map((item) => [item.nodeId, item])),
-    };
-  });
+  const cases = weightedCases(project, combination, caseResults);
+  const reactionCases = cases.map((term) => ({
+    ...term,
+    reactions: new Map(
+      term.result.reactions.map((item) => [item.nodeId, item]),
+    ),
+  }));
 
   const displacements = Object.fromEntries(
     project.nodes.map(({ id }) => [
@@ -91,7 +146,7 @@ export function combineLinearResults(
     .filter((node) => Object.values(node.restraints).some(Boolean))
     .map(({ id }) => ({
       nodeId: id,
-      ...sumComponents(reactionComponents, cases, (term) =>
+      ...sumComponents(reactionComponents, reactionCases, (term) =>
         term.reactions.get(id),
       ),
     }));
@@ -99,19 +154,7 @@ export function combineLinearResults(
   const members = Object.fromEntries(
     project.members.map(({ id }) => [
       id,
-      Array.from({ length: segments + 1 }, (_, index) => {
-        const t = index / segments;
-        const components = sumComponents(
-          stationComponents,
-          cases,
-          ({ result }) => {
-            const stations = result.members[id];
-            if (stations?.length === segments + 1 && stations[index]?.t === t)
-              return stations[index];
-          },
-        );
-        return { t, ...components };
-      }),
+      sumStations(stationComponents, cases, segments, id),
     ]),
   );
   return { displacements, reactions, members };
